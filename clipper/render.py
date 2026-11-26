@@ -316,7 +316,13 @@ def _fix_word(w: str, fixes: dict[str, str]) -> str:
         return w
     m = re.match(r"^(\W*)(.*?)(\W*)$", w)
     pre, core, post = m.groups()
-    return pre + fixes.get(core, core) + post
+    # Case-insensitive: Whisper writes "cypress" as often as "Cypress".
+    right = next((r for k, r in fixes.items() if k.lower() == core.lower()), None)
+    if right is None:
+        return w
+    if core.isupper() and len(core) > 1:  # keep shouting as shouting
+        right = right.upper()
+    return pre + right + post
 
 
 def words_in(segments: list[dict], start: float, end: float) -> list[dict]:
