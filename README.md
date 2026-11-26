@@ -77,6 +77,21 @@ was picked. Each clip also gets a `.jpg` contact sheet and automatic checks
   `work/sources/<id>/rank_prompt.md`, so you can paste it into Claude and feed
   the answer back with `--manual`.
 
+## Fast cuts (always on)
+
+Every clip gets fast-cut editing by default. This is a house rule, not a per-campaign option:
+
+- **Jump cuts:** quiet pauses between words longer than 0.35 s are cut down to 0.12 s.
+  A pause that is loud (laughter or game sound) is kept, since it is usually the reaction
+  or the payoff. Cuts never remove more than 30% of a clip or take it under the campaign minimum.
+- **Punch-in zooms:** the footage is split about every 3 s at word boundaries, and the zoom
+  alternates between 1.0x and 1.12x on each cut. Pieces that are clearly louder than the
+  speech (shouts, hype) punch in to 1.25x.
+
+Captions are re-timed to the edited cut. Tune it in the style guide's `edit` block
+(`zoom_every_s`, `zoom_amount`, `max_gap_s`...). Turn it off only for a campaign that
+forbids edits, with `"edit": {"enabled": false}`.
+
 ## Tastemaker: learn the style from top clips
 
 The tastemaker studies the most-viewed short clips of similar content and writes
