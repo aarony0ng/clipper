@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("campaign")
     a.add_argument("url")
     a.add_argument("--section", help="only this part of the VOD, e.g. 1:02:00-1:32:00")
-    a.add_argument("--engine", choices=["whisper", "youtube"], default="whisper")
+    a.add_argument("--engine", choices=["auto", "mlx", "faster-whisper", "whisper", "youtube"], default="auto")
     a.add_argument("--scenes", action="store_true", help="also detect scene cuts (slower)")
     a.add_argument("-n", type=int, help="moments to render")
     a.add_argument("--no-claude", action="store_true")
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("campaign"); a.add_argument("path"); a.add_argument("--id", required=True)
 
     a = sub.add_parser("transcribe"); a.add_argument("source")
-    a.add_argument("--engine", choices=["whisper", "youtube"], default="whisper")
+    a.add_argument("--engine", choices=["auto", "mlx", "faster-whisper", "whisper", "youtube"], default="auto")
     a.add_argument("--force", action="store_true")
 
     a = sub.add_parser("signals"); a.add_argument("source")

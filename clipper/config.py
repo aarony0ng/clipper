@@ -73,6 +73,10 @@ class Settings:
     work_dir: Path
     whisper_model: str = "small"
     whisper_device: str = "auto"
+    # "auto": mlx-whisper on Apple Silicon when installed, else faster-whisper.
+    transcribe_engine: str = "auto"
+    mlx_model: str = "mlx-community/whisper-large-v3-turbo"
+    language: str = "en"
     claude_model: str = "claude-opus-5-5"
     clips_per_source: int = 5
     variants_per_moment: int = 2

@@ -54,10 +54,11 @@ def _envelope(x: np.ndarray, sr: int, hop: float) -> np.ndarray:
 
 
 def transcript(settings: Settings, wav: Path, out: Path, model: str = "base") -> list[dict]:
+    """mlx-whisper (large-v3-turbo) on Apple Silicon; else faster-whisper `model` for speed."""
     if out.exists():
         return json.loads(out.read_text())
     from . import transcribe
-    segs = transcribe._whisper(wav, dataclasses.replace(settings, whisper_model=model))
+    segs, label = transcribe.asr(wav, dataclasses.replace(settings, whisper_model=model))
     out.write_text(json.dumps(segs))
     return segs
 
@@ -124,7 +125,7 @@ def fetch_clip_audio(url: str, out: Path) -> Path | None:
 
 def run(settings: Settings, cfg_path: Path, top: int = 24) -> Path:
     cfg = json.loads(cfg_path.read_text())
-    root = settings.work_dir.parent
+    root = Path(__file__).resolve().parents[1]  # repo root; config paths are relative to it
     out_dir = settings.work_dir / "scan" / cfg["name"]
     out_dir.mkdir(parents=True, exist_ok=True)
     povs = cfg["povs"]
