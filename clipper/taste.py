@@ -325,8 +325,11 @@ def _guide_brief(camp: Campaign, feats: list[dict], analyses: list[dict]) -> str
         f"Prohibited: {', '.join(camp.prohibited) or 'none'}.\nBrief: {camp.brief.strip()}\n</campaign>\n\n"
         "Our renderer: 1080x1920; word-by-word spoken captions (chunks of N words, current word "
         "highlighted by colour or box); a hook text block for the first seconds; an optional "
-        "persistent subcaption/title line; '#ad' disclosure for 3s; a small creator-name line. "
-        "It cannot add sound effects, zooms or emoji images yet; if top clips rely on those, "
+        "persistent subcaption/title line; '#ad' disclosure for 3s; a small creator-name line; "
+        "fast-cut editing that is always on (house rule): jump cuts over quiet pauses and punch-in "
+        "zooms that alternate on every cut, about every `edit.zoom_every_s` seconds, with a stronger "
+        "zoom on loud reactions. Tune the `edit` block to match the measured cut rate. "
+        "It cannot add sound effects, b-roll or emoji images yet; if top clips rely on those, "
         "say so in evidence and 'avoid' nothing on that account.\n\n"
         "Clips, most-viewed first (one JSON object per line):\n" + "\n".join(rows)
         + "\n\nWrite the style guide. Rules must stay inside the campaign's rules."
@@ -391,7 +394,10 @@ def report(settings: Settings, camp: Campaign) -> Path:
         f"{'at ' + format(c.y_frac, '.0%') + ' height' if c.y_frac else 'layout default position'}.",
         f"- Hook: {h.seconds:.1f}s, {h.style} style, {h.font_size}px.",
         f"- Subcaption: {'on, ' + s.style + ' style, ' + str(s.font_size) + 'px, from ' + format(s.from_s, '.1f') + 's' if s.enabled else 'off'}.",
-        f"- Layout: {guide.layout_preference}.", "",
+        f"- Layout: {guide.layout_preference}.",
+        (f"- Fast cuts: {'jump cuts over pauses longer than ' + format(guide.edit.max_gap_s, '.2f') + 's, ' if guide.edit.jump_cuts else ''}"
+         f"a zoom change about every {guide.edit.zoom_every_s:.1f}s ({guide.edit.zoom_amount:.2f}x, "
+         f"{guide.edit.reaction_zoom:.2f}x on loud reactions)." if guide.edit.enabled else "- Fast cuts: off."), "",
     ]
     for title, items in (("Moments to pick", guide.moment_rules), ("Hooks", guide.hook_rules),
                          ("Subcaptions", guide.subcaption_rules), ("Avoid", guide.avoid),

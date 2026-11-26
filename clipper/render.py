@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import db, transcribe
+from . import db, edit, transcribe
 from .config import Campaign, Settings, guide_path
 from .style import StyleGuide, ass_color, load as load_guide
 from .ingest import probe_video
@@ -269,9 +269,17 @@ def words_in(segments: list[dict], start: float, end: float) -> list[dict]:
 
 # ---------------------------------------------------------------- render + checks
 
-def render_clip(video: Path, out: Path, start: float, end: float, layout: Layout, ass_path: Path) -> None:
+def render_clip(video: Path, out: Path, start: float, end: float, layout: Layout, ass_path: Path,
+                pieces: list | None = None) -> None:
+    """`pieces` (edit.plan) applies jump cuts and zooms before the captions are burned in."""
     dur = end - start
-    fc = (
+    if pieces and (len(pieces) > 1 or pieces[0].zoom > 1.001):
+        cut_dur = edit.length(pieces)
+        fc = (layout.filter + ";" + edit.filter_graph(pieces, W, H) + f";[cut]ass={ass_path.name}[v];"
+              f"[cuta]loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:d=0.04,"
+              f"afade=t=out:st={max(0.0, cut_dur - 0.3):.2f}:d=0.3,aresample=48000[a]")
+    else:
+        fc = (
         layout.filter + f";[base]ass={ass_path.name}[v];"
         f"[0:a]loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:d=0.04,"
         f"afade=t=out:st={max(0.0, dur - 0.3):.2f}:d=0.3,aresample=48000[a]"
@@ -353,17 +361,24 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
                 made.append(out)
                 continue
             ass = out_dir / f"{cid}.ass"
-            ass.write_text(build_ass(words_in(segments, start, end), end - start, layout, hook, camp, settings,
+            words = words_in(segments, start, end)
+            pieces = edit.plan(words, end - start, sdir / "audio.wav", start, guide.edit, min_len=camp.min_s)
+            clip_len = edit.length(pieces)
+            ass.write_text(build_ass(edit.remap(words, pieces), clip_len, layout, hook, camp, settings,
                                      guide=guide, subcaption=m["subcaption"] or ""))
             try:
-                render_clip(video, out, start, end, layout, ass)
-                contact_sheet(out, out_dir / f"{cid}.jpg", end - start)
-                qa = quick_checks(out, end - start)
+                render_clip(video, out, start, end, layout, ass, pieces)
+                contact_sheet(out, out_dir / f"{cid}.jpg", clip_len)
+                qa = quick_checks(out, clip_len)
                 qa["layout_note"] = layout.note
+                qa["cuts"] = len(pieces) - 1
+                qa["cut_s"] = round(end - start - clip_len, 2)
+                qa["zooms"] = sum(p.zoom > 1.001 for p in pieces)
                 status = "rendered" if qa["pass"] else "qa_failed"
                 db.upsert(con, "clip", {"id": cid, "moment_id": m["id"], "variant": v, "path": str(out),
                                         "layout": layout.mode, "qa": qa, "status": status, "error": None})
-                print(f"[render] {cid}: {layout.mode} {qa['duration']}s lufs={qa['integrated_lufs']} "
+                print(f"[render] {cid}: {layout.mode} {qa['duration']}s ({qa['cuts']} cuts, "
+                      f"{qa['cut_s']}s of pauses removed, {qa['zooms']} zoomed) lufs={qa['integrated_lufs']} "
                       f"{'OK' if qa['pass'] else 'CHECK'} hook={hook!r}")
                 made.append(out)
             except subprocess.CalledProcessError as e:
