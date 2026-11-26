@@ -175,14 +175,13 @@ def choose_layout(video: Path, start: float, end: float, camp: Campaign, channel
         if cuts:
             note = (note + "; " if note else "") + f"WARNING: {cuts} UI text box(es) still cut at a crop edge"
         layout_cuts = cuts
-        # If the gameplay view takes in part of the cam, blur that part so the cam isn't doubled.
-        ox0, ox1 = max(gx, int(cam_l)), min(gx + gw, int(np.ceil(cam_r)))
-        oy0, oy1 = max(gy, int(y)), min(gy + gh, int(np.ceil(y + ch0)))
+        # If the gameplay view takes in part of the cam, paint that part over from the
+        # surrounding gameplay (delogo interpolates from the edges) so the cam isn't doubled.
+        ox0, ox1 = max(gx + 1, int(cam_l), 1), min(gx + gw - 1, int(np.ceil(cam_r)), sw - 2)
+        oy0, oy1 = max(gy + 1, int(y), 1), min(gy + gh - 1, int(np.ceil(y + ch0)), sh - 2)
         gsrc, pre = "g", ""
         if ox1 - ox0 > 4 and oy1 - oy0 > 4:
-            ow, oh = _even(ox1 - ox0), _even(oy1 - oy0)
-            pre = (f"[g]split=2[g0][g1];[g1]crop={ow}:{oh}:{ox0}:{oy0},boxblur={max(1, min(24, min(ow, oh) // 2 - 1))}:2[gb];"
-                   f"[g0][gb]overlay={ox0}:{oy0}[gm];")
+            pre = f"[g]delogo=x={ox0}:y={oy0}:w={ox1 - ox0}:h={oy1 - oy0}[gm];"
             gsrc = "gm"
         bot = pre + _panel_filter(gsrc, "bot", gx, gy, gw, gh, W, bot_h)
         filt = f"[0:v]split=2[c][g];{top};{bot};[top][bot]vstack=inputs=2,setsar=1[base]"
