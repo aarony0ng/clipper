@@ -66,6 +66,10 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--min-views", type=int, default=10_000)
     a.add_argument("--force", action="store_true")
 
+    a = sub.add_parser("scan", help="scan several POV VODs of one group stream for the best moments")
+    a.add_argument("config", help="scan config JSON (see clipper/scan.py)")
+    a.add_argument("--top", type=int, default=24, help="peaks to shortlist")
+
     sub.add_parser("campaigns", help="list campaigns and whether they are licensed")
 
     args = p.parse_args(argv)
@@ -104,6 +108,9 @@ def main(argv: list[str] | None = None) -> int:
                              use_guide=not args.no_guide, tag=args.tag)
         name = f"{args.source}-{args.tag}" if args.tag else args.source
         print(f"Review: {settings.work_dir / 'clips' / name / 'review.html'}")
+    elif args.cmd == "scan":
+        from . import scan
+        scan.run(settings, Path(args.config), top=args.top)
     elif args.cmd == "taste":
         from . import taste
         camp = camps[args.campaign]
