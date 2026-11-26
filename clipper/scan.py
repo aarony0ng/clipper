@@ -126,7 +126,7 @@ def fetch_clip_audio(url: str, out: Path) -> Path | None:
 def run(settings: Settings, cfg_path: Path, top: int = 24) -> Path:
     cfg = json.loads(cfg_path.read_text())
     root = Path(__file__).resolve().parents[1]  # repo root; config paths are relative to it
-    out_dir = settings.work_dir / "scan" / cfg["name"]
+    out_dir = (settings.work_dir if settings.work_dir.is_absolute() else root / settings.work_dir) / "scan" / cfg["name"]
     out_dir.mkdir(parents=True, exist_ok=True)
     povs = cfg["povs"]
     w0 = min(p["vod_start_ts"] + p["start"] for p in povs)
