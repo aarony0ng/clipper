@@ -1,0 +1,7 @@
+yt-dlp>=2025.11.12
+faster-whisper>=1.1
+anthropic>=0.75
+pydantic>=2
+numpy
+opencv-python-headless<5   # 4.x ships the Haar face cascades used for reframing
+pyyaml

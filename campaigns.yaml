@@ -1,0 +1,112 @@
+# Campaign allowlist. The pipeline refuses to download or clip anything that is
+# not on a campaign here with `licensed: true`. Set that flag yourself, only
+# after reading the campaign's terms on its page and confirming it pays for
+# clips of this creator's content. Re-check the remaining budget there too:
+# per-view budgets drain in days.
+
+settings:
+  work_dir: work                 # downloads, transcripts, clips, state.db
+  whisper_model: small           # tiny | base | small | medium | large-v3 (better, slower)
+  whisper_device: auto           # auto | cpu | cuda
+  claude_model: claude-opus-5-5
+  clips_per_source: 5
+  variants_per_moment: 2         # A/B: different hook text, variant 2 opens a beat later
+  caption_font: Inter ExtraBold  # falls back to the system default if missing
+
+campaigns:
+  # CHOSEN 2026-11-25. Checked live on the Content Rewards page at ~21:20 UTC:
+  # "Accepting clips", $6,662 of $7,500 left, 16 clippers, $2.00 per 1K views on
+  # TikTok/Instagram/YouTube/X, $20 min and $500 max per clip, run by Reach
+  # (97 campaigns, shown as verified on ClippingAlpha), budget runs to ~24 Dec.
+  # The page licenses clipping these VODs: "Get paid to clip content from Sypher,
+  # Replays, or Maddynf's VOD's from their stream on November 15."
+  # Joined on Aaron's account 2026-11-25. Rules: min 10,000 views to be paid; submit
+  # within 30 min of posting; one strike for botting or "AI-generated content".
+  - id: sypherpk-nov15
+    creator: SypherPK (with Replays and Maddynf)
+    licensed: true
+    campaign_url: https://contentrewards.com/c/campaigns/f2c529a0-6777-4e8a-b50b-4c8bd4e4d90f
+    rules_url: https://reachclipping.com/SypherPK
+    channels:
+      - https://www.twitch.tv/sypherpk
+      - https://www.twitch.tv/replays
+      - https://www.twitch.tv/maddynf
+    # Eligible footage only (from the campaign's reference materials, read 2026-11-25):
+    #   Sypher  https://www.twitch.tv/videos/2929935152  45:50 onwards
+    #   Replays https://www.twitch.tv/videos/2929917089  1:06:07 - 3:03:10
+    #   Maddynf https://www.twitch.tv/videos/2929952825  0:25:00 - 2:22:00
+    # Use --section to stay inside these windows.
+    payout: {type: cpm, per_1k_views: 2.00, min_views: 10000, min_payout: 20, max_payout: 500,
+             budget: 7500, platforms: [tiktok, instagram_reels, youtube_shorts, x]}
+    clip: {min_s: 20, max_s: 50}
+    required:
+      # The overlay must name at least one creator; this sits on screen for the whole clip.
+      handle: "Sypher · Replays · Maddynf"
+      hashtags: ["#fortnitecreative", "#uefn"]   # go in the post caption (posting is not built yet)
+      disclosure: "#ad"
+      disclosure_seconds: 3
+    prohibited:
+      - anything showing Sypher, Replays, Maddynf, Fortnite, Epic Games or UEFN in a negative light
+      - hate farming or false negative narratives
+      - non-English text
+      - logos of any kind
+      - moments where the three of them playing together are not the main focus
+    brief: |
+      Clip moments from Sypher, Replays and Maddynf's November 15 stream together
+      (Fortnite / UEFN creative). All three playing together must be the main focus.
+      Open on the first spoken line with no lead-in. English captions only. Funny,
+      hype or clutch moments between the three work best. Hooks must stay positive
+      about the creators and the game, and should name at least one of them.
+    # Sypher's facecam, measured on the VOD (1920x1080): auto-detect picked wrong crops.
+    reframe: {mode: auto, facecam: [2, 412, 518, 320]}
+    # Whisper mishears his name.
+    caption_fixes: {Cypher: Sypher, "Cypher's": "Sypher's", Cypress: "Sypher's"}
+    # Tastemaker: where top clips of similar content live. Shorts from SypherPK's own
+    # channel plus searches; the tastemaker keeps the most-viewed ones under 90 s.
+    taste_sources:
+      - "https://www.youtube.com/@SypherPK/shorts"
+      - "ytsearch60:sypherpk shorts"
+      - "ytsearch60:sypherpk replays maddynf"
+      - "ytsearch60:fortnite streamer funny moments shorts"
+
+  # From the 2026-11-24 roundup in the blueprint addendum. Fill in the campaign
+  # page URL and the creator's channel URL(s), read the terms, then flip `licensed`.
+  - id: arthurtv-gta6
+    creator: ArthurTV
+    licensed: false
+    campaign_url: ""             # TODO: the Content Rewards campaign page
+    channels: []                 # TODO: e.g. https://www.youtube.com/@<handle>
+    payout: {type: cpm, per_1k_views: 1.50, budget: 5000, platforms: [tiktok]}
+    clip: {min_s: 15, max_s: 60}
+    required:
+      handle: ""                 # e.g. "@ArthurTV" if the brief asks for it on screen
+      hashtags: []
+      disclosure: "#ad"          # shown for the first few seconds; campaigns reject clips without one
+      disclosure_seconds: 3
+    prohibited: []
+    brief: |
+      GTA 6 gameplay clips. Paste the campaign brief here; it is given to Claude
+      when ranking moments.
+    reframe: {mode: auto}        # auto | facecam_split | track | center | blur_pad; facecam: [x, y, w, h]
+
+  - id: bobbyvanriper-gta6
+    creator: Bobby VanRiper
+    licensed: false
+    campaign_url: ""
+    channels: []
+    payout: {type: cpm, per_1k_views: 1.50, budget: 1000, platforms: [tiktok, instagram, youtube_shorts]}
+    clip: {min_s: 15, max_s: 60}
+    required: {disclosure: "#ad"}
+    brief: ""
+    reframe: {mode: auto}
+
+  - id: laurenhamden-gta6
+    creator: Lauren Hamden
+    licensed: false
+    campaign_url: ""
+    channels: []
+    payout: {type: cpm, per_1k_views: 1.50, budget: 5000, platforms: [tiktok, instagram]}
+    clip: {min_s: 15, max_s: 60}
+    required: {disclosure: "#ad"}
+    brief: ""
+    reframe: {mode: auto}
