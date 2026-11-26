@@ -176,21 +176,68 @@ def source_text(video: Path, times: list[float]) -> list[list[int]]:
             img = cv2.imdecode(np.frombuffer(p.stdout, np.uint8), cv2.IMREAD_COLOR)
             if img is not None:
                 imgs.append(img)
-    return [b for bs in detect_many(imgs) for b in bs] if imgs else []
+    return detect_many(imgs) if imgs else []
+
+
+def must_keep(per_frame: list[list[list[int]]], frame_w: int = 1920, min_frames: int = 3,
+              big_h: int = 60) -> list[list[int]]:
+    """Text a crop must never cut: on-screen UI that stays put (seen in the same place in
+    at least `min_frames` samples), and big centred banners ("HOLE-IN-ONE!", "VICTORY")
+    even when brief. Text that floats with the 3D world (name tags, +36 pickups) drifts
+    across the stream's own frame edge and is not held to this."""
+    keep = []
+    for bs in per_frame:
+        for b in bs:
+            cx = (b[0] + b[2]) / 2
+            banner = b[3] - b[1] >= big_h and abs(cx - frame_w / 2) < 0.15 * frame_w
+            steady = sum(1 for o_bs in per_frame if any(_iou(b, o) > 0.4 for o in o_bs)) >= min_frames
+            if (banner or steady) and not any(_iou(b, k) > 0.6 for k in keep):
+                keep.append(b)
+    return keep
+
+
+def _iou(a, b) -> float:
+    ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    return inter / max(1, (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+
+
+def overlaps(b: list[int], rect: tuple, frac: float = 0.0) -> bool:
+    """True if box b overlaps rect (x, y, w, h); with frac, if at least that share of b is inside."""
+    x, y, w, h = rect
+    ix = max(0, min(b[2], x + w) - max(b[0], x))
+    iy = max(0, min(b[3], y + h) - max(b[1], y))
+    area = max(1, (b[2] - b[0]) * (b[3] - b[1]))
+    return ix * iy > frac * area if frac else ix * iy > 0
+
+
+TOL = 6  # px: Vision's box edges are approximate; a sliver this thin isn't a cut
+
+
+def _cut(b: list[int], x: float, y: float, w: float, h: float) -> bool:
+    """Does the rect (x, y, w, h) slice through box b (part of it inside, part outside)?"""
+    ix = min(b[2], x + w) - max(b[0], x)
+    iy = min(b[3], y + h) - max(b[1], y)
+    if ix <= TOL or iy <= TOL:
+        return False  # (essentially) outside
+    out_x = (b[2] - b[0]) - ix
+    out_y = (b[3] - b[1]) - iy
+    return out_x > TOL or out_y > TOL
+
+
+def crop_cuts(boxes: list[list[int]], x: float, y: float, w: float, h: float, pad: int = 0) -> int:
+    """How many text boxes the crop rect (x, y, w, h) slices through."""
+    return sum(_cut(b, x, y, w, h) for b in boxes)
 
 
 def clear_crop_x(boxes: list[list[int]], x: int, w: int, y: int, h: int, lo: int, hi: int,
-                 pad: int = 8) -> int:
-    """Nearest crop left edge in [lo, hi] whose sides don't cut through any text box."""
+                 pad: int = 0) -> int:
+    """Crop left edge in [lo, hi] that slices the fewest text boxes, nearest to x."""
     rows = [b for b in boxes if b[3] > y and b[1] < y + h]
-
-    def cuts(cx):
-        return sum(1 for b in rows if (b[0] - pad < cx < b[2] + pad) or (b[0] - pad < cx + w < b[2] + pad))
-
-    if not rows or not cuts(x) or hi < lo:
+    if not rows or hi < lo or not crop_cuts(rows, x, y, w, h):
         return x
-    best = min(range(lo, hi + 1, 2), key=lambda cx: (cuts(cx), abs(cx - x)))
-    return best
+    return min(range(lo, hi + 1, 2), key=lambda cx: (crop_cuts(rows, cx, y, w, h), abs(cx - x)))
 
 
 # ---------------------------------------------------------------- zoom solver

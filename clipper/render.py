@@ -35,6 +35,7 @@ class Layout:
     handle_y: int = 0
     note: str = ""
     panels: list = None   # [(y0, y1)] regions zoomed independently; None = whole frame
+    text_cut: int = 0     # UI text boxes the crop could not avoid cutting (QA fails if > 0)
 
 
 def _even(x: float) -> int:
@@ -60,6 +61,19 @@ def _detect_faces(video: Path, start: float, end: float, samples: int = 10) -> t
             found.append(max(faces, key=lambda f: f[2] * f[3]).tolist())
     cap.release()
     return found, sw, sh
+
+
+def _panel_filter(src: str, out: str, x: float, y: float, w: float, h: float, pw: int, ph: int) -> str:
+    """Source rect -> pw x ph panel. Same aspect: crop and scale. Otherwise the whole rect
+    is fitted (nothing cut) over a blurred, filled copy of itself."""
+    x, y, w, h = int(x), int(y), _even(w), _even(h)
+    if abs((w / h) - (pw / ph)) / (pw / ph) < 0.02:
+        return f"[{src}]crop={w}:{h}:{x}:{y},scale={pw}:{ph}:flags=lanczos,setsar=1[{out}]"
+    return (f"[{src}]crop={w}:{h}:{x}:{y},split=2[{out}b][{out}f];"
+            f"[{out}b]scale={pw}:{ph}:force_original_aspect_ratio=increase,crop={pw}:{ph},gblur=sigma=30,"
+            f"eq=brightness=-0.15[{out}bb];"
+            f"[{out}f]scale={pw}:{ph}:force_original_aspect_ratio=decrease:flags=lanczos[{out}ff];"
+            f"[{out}bb][{out}ff]overlay=(W-w)/2:(H-h)/2,setsar=1[{out}]")
 
 
 def choose_layout(video: Path, start: float, end: float, camp: Campaign, channel_url: str | None = None) -> Layout:
@@ -96,46 +110,85 @@ def choose_layout(video: Path, start: float, end: float, camp: Campaign, channel
             mode, note = "blur_pad", "no steady face found"
 
     if mode == "facecam_split":
-        x, y, cw, ch = cam
-        # Fit the box to the top panel's aspect around its centre, inside the frame.
-        aspect = W / top_h
-        cxm, cym = x + cw / 2, y + ch / 2
-        # Trim (not grow) to the panel aspect so no gameplay bleeds into the cam panel.
-        if cw / ch > aspect:
-            cw = ch * aspect
-        else:
-            ch = cw / aspect
-        cw, ch = min(cw, sw), min(ch, sh)
-        x0 = int(np.clip(cxm - cw / 2, 0, sw - cw))
-        y0 = int(np.clip(cym - ch / 2, 0, sh - ch))
         bot_h = H - top_h
-        gw = min(sw, sh * W / bot_h)
-        gh = min(sh, gw * bot_h / W)
-        gx, gy = int((sw - gw) / 2), int((sh - gh) / 2)
-        # Keep the gameplay crop clear of the facecam so no strip of cam shows below.
-        cam_l, cam_r = cam[0], cam[0] + cam[2]
-        lo, hi = 0, int(sw - gw)
-        if gx < cam_r and gx + gw > cam_l:
-            if cam_l + cam[2] / 2 < sw / 2 and cam_r + gw <= sw:
-                gx = lo = int(np.ceil(cam_r))
-            elif cam_l - gw >= 0:
-                gx = hi = int(cam_l - gw)
-        # Never slice through on-screen text (scoreboards, HUD) at the crop's sides.
-        boxes = textsafe.source_text(video, [start + 0.5, (start + end) / 2, max(start + 0.5, end - 0.5)])
-        new_gx = textsafe.clear_crop_x(boxes, gx, int(gw), gy, int(gh), lo, hi)
-        if new_gx != gx:
-            note = (note + "; " if note else "") + f"gameplay crop moved {new_gx - gx:+d}px to keep text whole"
-            gx = new_gx
-        filt = (
-            f"[0:v]split=2[c][g];"
-            f"[c]crop={_even(cw)}:{_even(ch)}:{x0}:{y0},scale={W}:{top_h}:force_original_aspect_ratio=increase,"
-            f"crop={W}:{top_h}[top];"
-            f"[g]crop={_even(gw)}:{_even(gh)}:{gx}:{gy},scale={W}:{bot_h}:force_original_aspect_ratio=increase,"
-            f"crop={W}:{bot_h}[bot];"
-            f"[top][bot]vstack=inputs=2,setsar=1[base]"
-        )
+        # Text anywhere in the moment (sampled), so crops never slice a scoreboard, HUD or overlay.
+        n = 12
+        times = [start + 0.4 + k * max(0.0, end - start - 0.8) / (n - 1) for k in range(n)]
+        boxes = textsafe.must_keep(textsafe.source_text(video, times), frame_w=sw)
+        x, y, cw0, ch0 = cam
+        cam_rect = (x, y, cw0, ch0)
+
+        # Cam panel: trim to the panel's aspect, unless that would cut text on the cam
+        # (follower counts, timers); then show the whole cam box over a blurred fill.
+        aspect = W / top_h
+        cw, ch = (ch0 * aspect, ch0) if cw0 / ch0 > aspect else (cw0, cw0 / aspect)
+        cw, ch = min(cw, sw), min(ch, sh)
+        x0 = int(np.clip(x + cw0 / 2 - cw / 2, 0, sw - cw))
+        y0 = int(np.clip(y + ch0 / 2 - ch / 2, 0, sh - ch))
+        on_cam = [bx for bx in boxes if textsafe.overlaps(bx, cam_rect)]
+        if textsafe.crop_cuts(on_cam, x0, y0, cw, ch):
+            top = _panel_filter("c", "top", x, y, cw0, ch0, W, top_h)
+            note = (note + "; " if note else "") + "whole facecam shown (trimming would cut its text)"
+        else:
+            top = _panel_filter("c", "top", x0, y0, cw, ch, W, top_h)
+
+        # Gameplay panel: the narrowest crop, clear of the cam, whose sides cut no text.
+        cam_l, cam_r = x, x + cw0
+        game = [bx for bx in boxes if not textsafe.overlaps(bx, cam_rect, 0.5)]
+        gw0 = min(sw, sh * W / bot_h)
+        cam_left = cam_l + cw0 / 2 < sw / 2
+        # widest crop that still keeps the cam out of the gameplay panel
+        hi_w = max(int(gw0), int(sw - np.ceil(cam_r)) if cam_left else int(cam_l))
+        best = None
+        for gw in list(range(int(gw0), hi_w + 1, 8)) + [hi_w]:
+            gh = min(sh, gw * bot_h / W)
+            gy = int((sh - gh) / 2)
+            if cam_left:
+                x_lo, x_hi = int(np.ceil(cam_r)), int(sw - gw)
+            else:
+                x_lo, x_hi = 0, int(cam_l - gw)
+            if x_hi < x_lo:  # cam can't be avoided at this width
+                x_lo, x_hi = 0, int(sw - gw)
+            want = int(np.clip((sw - gw) / 2, x_lo, x_hi))
+            gx = textsafe.clear_crop_x(game, want, gw, gy, int(gh), x_lo, x_hi)
+            c = textsafe.crop_cuts(game, gx, gy, gw, gh)
+            if best is None or c < best[0]:
+                best = (c, gw, gx, gy, gh)
+            if c == 0:
+                break
+        if best[0]:
+            # Last resort: allow a wider view that may take in part of the cam's corner of the
+            # source. A sliver of duplicated cam is better than a scoreboard sliced in half.
+            for gw in range(int(gw0), int(sw) + 1, 8):
+                gh = min(sh, gw * bot_h / W)
+                gy = int((sh - gh) / 2)
+                want = int(np.clip(best[2] - (gw - best[1]) / 2, 0, sw - gw))
+                gx = textsafe.clear_crop_x(game, want, gw, gy, int(gh), 0, int(sw - gw))
+                c = textsafe.crop_cuts(game, gx, gy, gw, gh)
+                if c == 0:
+                    best = (0, gw, gx, gy, gh)
+                    note = (note + "; " if note else "") + "gameplay view takes in part of the cam area to keep text whole"
+                    break
+        cuts, gw, gx, gy, gh = best
+        if gw > gw0 + 1:
+            note = (note + "; " if note else "") + f"gameplay widened to {gw}px to keep UI text whole"
+        if cuts:
+            note = (note + "; " if note else "") + f"WARNING: {cuts} UI text box(es) still cut at a crop edge"
+        layout_cuts = cuts
+        # If the gameplay view takes in part of the cam, blur that part so the cam isn't doubled.
+        ox0, ox1 = max(gx, int(cam_l)), min(gx + gw, int(np.ceil(cam_r)))
+        oy0, oy1 = max(gy, int(y)), min(gy + gh, int(np.ceil(y + ch0)))
+        gsrc, pre = "g", ""
+        if ox1 - ox0 > 4 and oy1 - oy0 > 4:
+            ow, oh = _even(ox1 - ox0), _even(oy1 - oy0)
+            pre = (f"[g]split=2[g0][g1];[g1]crop={ow}:{oh}:{ox0}:{oy0},boxblur={max(1, min(24, min(ow, oh) // 2 - 1))}:2[gb];"
+                   f"[g0][gb]overlay={ox0}:{oy0}[gm];")
+            gsrc = "gm"
+        bot = pre + _panel_filter(gsrc, "bot", gx, gy, gw, gh, W, bot_h)
+        filt = f"[0:v]split=2[c][g];{top};{bot};[top][bot]vstack=inputs=2,setsar=1[base]"
         return Layout(mode, filt, caption_y=top_h + 330, hook_y=top_h, handle_y=top_h - 40,
-                      note=note or "facecam box from config", panels=[(0, top_h), (top_h, H)])
+                      note=note or "facecam box from config", panels=[(0, top_h), (top_h, H)],
+                      text_cut=layout_cuts)
 
     if mode in ("track", "center"):
         cw = _even(min(sw, sh * 9 / 16))
@@ -477,7 +530,8 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
                 qa = quick_checks(out, clip_len)
                 qa.update(fit)
                 qa["zoom_text_cuts"] = len(cut)
-                qa["pass"] = qa["pass"] and fit["overlay_ok"] and not cut
+                qa["layout_text_cuts"] = layout.text_cut
+                qa["pass"] = qa["pass"] and fit["overlay_ok"] and not cut and not layout.text_cut
                 qa["layout_note"] = layout.note
                 qa["cuts"] = len(pieces) - 1
                 qa["cut_s"] = round(end - start - clip_len, 2)
