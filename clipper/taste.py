@@ -386,7 +386,8 @@ def report(settings: Settings, camp: Campaign) -> Path:
         "## What the clipper will do", "",
         f"- Length: about {p.target_s:.0f}s ({p.min_s:.0f}-{p.max_s:.0f}s); speech or action by {p.first_words_by_s:.1f}s.",
         f"- Captions: {c.words_per_chunk} words at a time, {'UPPERCASE' if c.uppercase else 'sentence case'}, "
-        f"{c.font_size}px, {c.text_color} with {c.highlight_mode} highlight {c.highlight_color}, "
+        f"{c.font_size}px, {c.text_color} with a {c.outline_px}px {c.outline_color} outline and "
+        f"{c.highlight_mode} highlight{' ' + c.highlight_color if c.highlight_mode != 'none' else ''}, "
         f"{'at ' + format(c.y_frac, '.0%') + ' height' if c.y_frac else 'layout default position'}.",
         f"- Hook: {h.seconds:.1f}s, {h.style} style, {h.font_size}px.",
         f"- Subcaption: {'on, ' + s.style + ' style, ' + str(s.font_size) + 'px, from ' + format(s.from_s, '.1f') + 's' if s.enabled else 'off'}.",

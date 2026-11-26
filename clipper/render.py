@@ -189,7 +189,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,{font},{c.font_size},{ass_color(c.text_color)},{ass_color(c.text_color)},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline_px},3,5,60,60,0,1
+Style: Cap,{font},{c.font_size},{ass_color(c.text_color)},{ass_color(c.text_color)},{ass_color(c.outline_color)},&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline_px},3,5,60,60,0,1
 Style: Hook,{font},{hk.font_size},{ass_color(hk.text_color)},{ass_color(hk.text_color)},{ass_color(hk.box_color) if hook_box else "&H00000000"},{ass_color(hk.box_color) if hook_box else "&H80000000"},-1,0,0,0,100,100,0,0,{3 if hook_box else 1},{18 if hook_box else 8},0,5,80,80,0,1
 Style: Sub,{font},{sc.font_size},{ass_color(sc.text_color)},{ass_color(sc.text_color)},{ass_color(sc.box_color) if sub_box else "&H00000000"},{ass_color(sc.box_color) if sub_box else "&H80000000"},-1,0,0,0,100,100,0,0,{3 if sub_box else 1},{14 if sub_box else 6},0,5,80,80,0,1
 Style: Disc,{font},40,&H00FFFFFF,&H00FFFFFF,&H99000000,&H99000000,-1,0,0,0,100,100,0,0,3,10,0,8,60,60,0,1
@@ -217,7 +217,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 mark = lambda t: "{\\c" + hi + "}" + t + "{\\c" + base + "}"
             elif c.highlight_mode == "box":  # thick coloured outline reads as a box behind the word
                 mark = lambda t: ("{\\3c" + hi + "\\bord" + str(max(12, c.outline_px * 2)) + "}" + t
-                                  + "{\\3c&H000000&\\bord" + str(c.outline_px) + "}")
+                                  + "{\\3c" + ass_color(c.outline_color) + "\\bord" + str(c.outline_px) + "}")
             else:
                 mark = lambda t: t
             parts = [mark(t) if k == i else t for k, t in enumerate(texts)]
@@ -240,8 +240,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ev.append(f"Dialogue: 4,{_ts(0)},{_ts(min(camp.disclosure_seconds, clip_len))},Disc,,0,0,0,,"
                   f"{{\\an8\\pos(540,165)}}{_ass_escape(camp.disclosure)}")
     if camp.handle:
+        # A guide can put captions on the facecam seam, where the handle line sits; lift it clear.
+        handle_y = layout.handle_y
+        if abs(handle_y - y) < c.font_size // 2 + 40:
+            handle_y = y - c.font_size // 2 - 40
         ev.append(f"Dialogue: 0,{_ts(0)},{_ts(clip_len)},Handle,,0,0,0,,"
-                  f"{{\\an5\\pos(540,{layout.handle_y})}}{_ass_escape(camp.handle)}")
+                  f"{{\\an5\\pos(540,{handle_y})}}{_ass_escape(camp.handle)}")
     return head + "\n".join(ev) + "\n"
 
 
