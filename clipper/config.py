@@ -54,6 +54,13 @@ class Campaign:
     taste_sources: list[str] = field(default_factory=list)
     style_guide: str = ""
     reframe: Reframe = field(default_factory=Reframe)
+    # Per-channel overrides for group streams where each POV has its own facecam spot,
+    # keyed by channel login (e.g. {"replays": Reframe(...)}).
+    reframe_by_channel: dict[str, Reframe] = field(default_factory=dict)
+
+    def reframe_for(self, channel_url: str | None) -> Reframe:
+        login = _norm_channel(channel_url or "").rsplit("/", 1)[-1]
+        return self.reframe_by_channel.get(login, self.reframe)
 
     def channel_matches(self, *urls: str | None) -> bool:
         """True if any of the given channel/uploader URLs is on this campaign's list."""
@@ -99,6 +106,7 @@ def load(path: str | Path) -> tuple[Settings, dict[str, Campaign]]:
         clip = c.pop("clip", {}) or {}
         req = c.pop("required", {}) or {}
         rf = Reframe(**(c.pop("reframe", {}) or {}))
+        rf_by = {k.lower(): Reframe(**v) for k, v in (c.pop("reframe_by_channel", {}) or {}).items()}
         camp = Campaign(
             id=c.pop("id"),
             creator=c.pop("creator"),
@@ -111,6 +119,7 @@ def load(path: str | Path) -> tuple[Settings, dict[str, Campaign]]:
             disclosure=req.get("disclosure", ""),
             disclosure_seconds=float(req.get("disclosure_seconds", 3.0)),
             reframe=rf,
+            reframe_by_channel=rf_by,
             **c,
         )
         campaigns[camp.id] = camp

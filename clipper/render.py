@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import db, edit, transcribe
+from . import db, edit, textsafe, transcribe
 from .config import Campaign, Settings, guide_path
 from .style import StyleGuide, ass_color, load as load_guide
 from .ingest import probe_video
@@ -34,6 +34,7 @@ class Layout:
     hook_y: int
     handle_y: int = 0
     note: str = ""
+    panels: list = None   # [(y0, y1)] regions zoomed independently; None = whole frame
 
 
 def _even(x: float) -> int:
@@ -61,8 +62,8 @@ def _detect_faces(video: Path, start: float, end: float, samples: int = 10) -> t
     return found, sw, sh
 
 
-def choose_layout(video: Path, start: float, end: float, camp: Campaign) -> Layout:
-    rf = camp.reframe
+def choose_layout(video: Path, start: float, end: float, camp: Campaign, channel_url: str | None = None) -> Layout:
+    rf = camp.reframe_for(channel_url)
     info = probe_video(video)
     sw, sh = info["width"], info["height"]
     top_h = _even(H * rf.facecam_height_ratio)
@@ -113,11 +114,18 @@ def choose_layout(video: Path, start: float, end: float, camp: Campaign) -> Layo
         gx, gy = int((sw - gw) / 2), int((sh - gh) / 2)
         # Keep the gameplay crop clear of the facecam so no strip of cam shows below.
         cam_l, cam_r = cam[0], cam[0] + cam[2]
+        lo, hi = 0, int(sw - gw)
         if gx < cam_r and gx + gw > cam_l:
             if cam_l + cam[2] / 2 < sw / 2 and cam_r + gw <= sw:
-                gx = int(np.ceil(cam_r))
+                gx = lo = int(np.ceil(cam_r))
             elif cam_l - gw >= 0:
-                gx = int(cam_l - gw)
+                gx = hi = int(cam_l - gw)
+        # Never slice through on-screen text (scoreboards, HUD) at the crop's sides.
+        boxes = textsafe.source_text(video, [start + 0.5, (start + end) / 2, max(start + 0.5, end - 0.5)])
+        new_gx = textsafe.clear_crop_x(boxes, gx, int(gw), gy, int(gh), lo, hi)
+        if new_gx != gx:
+            note = (note + "; " if note else "") + f"gameplay crop moved {new_gx - gx:+d}px to keep text whole"
+            gx = new_gx
         filt = (
             f"[0:v]split=2[c][g];"
             f"[c]crop={_even(cw)}:{_even(ch)}:{x0}:{y0},scale={W}:{top_h}:force_original_aspect_ratio=increase,"
@@ -126,7 +134,8 @@ def choose_layout(video: Path, start: float, end: float, camp: Campaign) -> Layo
             f"crop={W}:{bot_h}[bot];"
             f"[top][bot]vstack=inputs=2,setsar=1[base]"
         )
-        return Layout(mode, filt, caption_y=top_h + 330, hook_y=top_h, handle_y=top_h - 40, note=note or "facecam box from config")
+        return Layout(mode, filt, caption_y=top_h + 330, hook_y=top_h, handle_y=top_h - 40,
+                      note=note or "facecam box from config", panels=[(0, top_h), (top_h, H)])
 
     if mode in ("track", "center"):
         cw = _even(min(sw, sh * 9 / 16))
@@ -275,7 +284,7 @@ def render_clip(video: Path, out: Path, start: float, end: float, layout: Layout
     dur = end - start
     if pieces and (len(pieces) > 1 or pieces[0].zoom > 1.001):
         cut_dur = edit.length(pieces)
-        fc = (layout.filter + ";" + edit.filter_graph(pieces, W, H) + f";[cut]ass={ass_path.name}[v];"
+        fc = (layout.filter + ";" + edit.filter_graph(pieces, W, H, layout.panels) + f";[cut]ass={ass_path.name}[v];"
               f"[cuta]loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:d=0.04,"
               f"afade=t=out:st={max(0.0, cut_dur - 0.3):.2f}:d=0.3,aresample=48000[a]")
     else:
@@ -291,6 +300,85 @@ def render_clip(video: Path, out: Path, start: float, end: float, layout: Layout
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out.resolve()),
     ]
     subprocess.run(cmd, check=True, cwd=ass_path.parent)
+
+
+def text_safe_crops(video: Path, start: float, layout: Layout, pieces: list) -> None:
+    """Pick each zoomed piece's per-panel crop so no on-screen text is cut (textsafe rule 2)."""
+    panels = layout.panels or [(0, H)]
+    for p in pieces:
+        if p.zoom <= 1.001:
+            p.crops = [(1.0, 0, 0, W, y1 - y0) for y0, y1 in panels]
+            continue
+        times = [p.s + 0.15, (p.s + p.e) / 2, max(p.s + 0.15, p.e - 0.15)]
+        frames = textsafe.base_frames(video, start, layout.filter, times)
+        boxes = [b for bs in textsafe.detect_many(list(frames.values())) for b in bs]
+        p.crops = [textsafe.solve_zoom(textsafe.panel_boxes(boxes, y0, y1), W, y1 - y0, p.zoom)
+                   for y0, y1 in panels]
+
+
+def place_hook(ass: Path, video: Path, start: float, layout: Layout) -> int:
+    """Move the hook so it never sits on top of on-screen game text (banners, scores).
+    Returns how far it moved (px)."""
+    meas = [e for e in textsafe.overlay_boxes(ass) if e["style"] == "Hook" and e["box"]]
+    if not meas:
+        return 0
+    line, (x0, y0, x1, y1) = meas[0]["line"], meas[0]["box"]
+    m = re.search(r"\\pos\(540,(\d+)\)", line)
+    if not m:
+        return 0
+    cur = int(m.group(1))
+    frames = textsafe.base_frames(video, start, layout.filter, [0.3, 1.2, 2.2])
+    game = [b for bs in textsafe.detect_many(list(frames.values())) for b in bs]
+    others = [e["box"] for e in textsafe.overlay_boxes(ass)
+              if e["box"] and e["style"] in ("Cap", "Handle", "Sub") and _active(e["line"], 1.0)]
+    half_up, half_dn = cur - y0, y1 - cur
+    lo = (layout.panels[-1][0] if layout.panels else 0) + half_up + 20
+    lo = max(lo, textsafe.SAFE_TOP + half_up)
+    hi = textsafe.SAFE_BOTTOM - half_dn
+
+    def clash(y):
+        a, b = y - half_up - 20, y + half_dn + 20
+        return sum(1 for g in game + others if g[1] < b and g[3] > a and g[0] < x1 + 20 and g[2] > x0 - 20)
+
+    if not clash(cur):
+        return 0
+    cands = sorted(range(int(lo), int(hi) + 1, 10), key=lambda y: (clash(y), abs(y - cur)))
+    best = cands[0] if cands else cur
+    if clash(best) >= clash(cur):
+        return 0
+    text = ass.read_text()
+    for e in [e for e in textsafe.overlay_boxes(ass) if e["style"] == "Hook"]:
+        text = text.replace(e["line"], e["line"].replace(f"\\pos(540,{cur})", f"\\pos(540,{best})"), 1)
+    ass.write_text(text)
+    return best - cur
+
+
+def zoom_qa(video: Path, out: Path, start: float, layout: Layout, pieces: list, ass: Path) -> list[int]:
+    """Indexes of zoomed pieces where the output cuts on-screen text the unzoomed frame shows whole."""
+    panels = layout.panels or [(0, H)]
+    overlay = textsafe.overlay_boxes(ass)
+    bad, t_out = [], 0.0
+    for i, p in enumerate(pieces):
+        mid_out = t_out + (p.e - p.s) / 2
+        t_out += p.e - p.s
+        if not any(c[0] > 1.001 for c in (p.crops or [])):
+            continue
+        base = textsafe.base_frames(video, start, layout.filter, [(p.s + p.e) / 2]).get((p.s + p.e) / 2)
+        img = textsafe.output_frame(out, mid_out)
+        if base is None or img is None:
+            continue
+        ours = [e["box"] for e in overlay if e["box"] and _active(e["line"], mid_out)]
+        if textsafe.cut_text(base, img, panels, ours):
+            bad.append(i)
+    return bad
+
+
+def _active(line: str, t: float) -> bool:
+    f = line.split(",")
+    def sec(x):
+        h, m, s_ = x.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s_)
+    return sec(f[1]) <= t <= sec(f[2])
 
 
 def contact_sheet(clip: Path, out: Path, dur: float, n: int = 6) -> None:
@@ -348,7 +436,8 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
         if only and m["rank"] not in only:
             continue
         hooks = json.loads(m["hooks"] or "[]") or [""]
-        layout = choose_layout(video, m["start"], m["end"], camp)
+        pieces = None
+        layout = choose_layout(video, m["start"], m["end"], camp, src["channel_url"])
         for v in range(1, settings.variants_per_moment + 1):
             hook = hooks[(v - 1) % len(hooks)]
             # Variants share the same in-point (campaigns like SypherPK's require opening
@@ -362,18 +451,37 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
                 continue
             ass = out_dir / f"{cid}.ass"
             words = words_in(segments, start, end)
-            pieces = edit.plan(words, end - start, sdir / "audio.wav", start, guide.edit, min_len=camp.min_s)
+            if pieces is None:  # shared by the moment's variants
+                pieces = edit.plan(words, end - start, sdir / "audio.wav", start, guide.edit, min_len=camp.min_s)
+                text_safe_crops(video, start, layout, pieces)
             clip_len = edit.length(pieces)
             ass.write_text(build_ass(edit.remap(words, pieces), clip_len, layout, hook, camp, settings,
                                      guide=guide, subcaption=m["subcaption"] or ""))
+            fit = textsafe.fit_overlay(ass, {"Cap": guide.caption.font_size, "Hook": guide.hook.font_size,
+                                             "Sub": guide.subcaption.font_size, "Disc": 40, "Handle": 38})
+            fit["hook_moved"] = place_hook(ass, video, start, layout)
             try:
-                render_clip(video, out, start, end, layout, ass, pieces)
+                for attempt in range(3):
+                    render_clip(video, out, start, end, layout, ass, pieces)
+                    cut = zoom_qa(video, out, start, layout, pieces, ass)
+                    if not cut:
+                        break
+                    print(f"[render] {cid}: zoom cut on-screen text in {len(cut)} piece(s); retrying with less zoom")
+                    for i in cut:
+                        p = pieces[i]
+                        p.zoom = 1.0 if attempt >= 1 else 1 + (p.zoom - 1) / 2
+                        text_safe_crops(video, start, layout, [p])
+                (out_dir / f"{cid}.edit.json").write_text(json.dumps(
+                    [{"s": p.s, "e": p.e, "zoom": p.zoom, "crops": p.crops} for p in pieces]))
                 contact_sheet(out, out_dir / f"{cid}.jpg", clip_len)
                 qa = quick_checks(out, clip_len)
+                qa.update(fit)
+                qa["zoom_text_cuts"] = len(cut)
+                qa["pass"] = qa["pass"] and fit["overlay_ok"] and not cut
                 qa["layout_note"] = layout.note
                 qa["cuts"] = len(pieces) - 1
                 qa["cut_s"] = round(end - start - clip_len, 2)
-                qa["zooms"] = sum(p.zoom > 1.001 for p in pieces)
+                qa["zooms"] = sum(any(c[0] > 1.001 for c in (p.crops or [])) for p in pieces)
                 status = "rendered" if qa["pass"] else "qa_failed"
                 db.upsert(con, "clip", {"id": cid, "moment_id": m["id"], "variant": v, "path": str(out),
                                         "layout": layout.mode, "qa": qa, "status": status, "error": None})

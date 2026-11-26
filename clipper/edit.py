@@ -29,7 +29,10 @@ from .style import EditStyle
 class Piece:
     s: float      # clip time (seconds from the moment's start)
     e: float
-    zoom: float = 1.0
+    zoom: float = 1.0          # wanted punch-in
+    # Text-safe crops actually used, one per layout panel: (zoom, x, y, w, h) in panel pixels.
+    # None means "use `zoom` centred on the whole frame" (only for callers that skip text checks).
+    crops: list | None = None
 
 
 def _db(x: np.ndarray) -> float:
@@ -134,17 +137,38 @@ def remap(words: list[dict], pieces: list[Piece]) -> list[dict]:
     return out
 
 
-def filter_graph(pieces: list[Piece], W: int, H: int) -> str:
-    """ffmpeg filters taking [base] and [0:a], producing [cut] and [cuta]."""
+def filter_graph(pieces: list[Piece], W: int, H: int, panels: list[tuple[int, int]] | None = None) -> str:
+    """ffmpeg filters taking [base] and [0:a], producing [cut] and [cuta].
+    Each panel (e.g. facecam and gameplay in a split layout) is zoomed on its own,
+    so the seam never moves and each panel's crop can avoid its own on-screen text."""
+    panels = panels or [(0, H)]
     n = len(pieces)
     parts = [f"[base]split={n}" + "".join(f"[vb{i}]" for i in range(n)),
              f"[0:a]asplit={n}" + "".join(f"[ab{i}]" for i in range(n))]
     for i, p in enumerate(pieces):
         v = f"[vb{i}]trim=start={p.s:.3f}:end={p.e:.3f},setpts=PTS-STARTPTS"
-        if p.zoom > 1.001:
-            zw, zh = int(round(W * p.zoom / 2)) * 2, int(round(H * p.zoom / 2)) * 2
-            v += f",scale={zw}:{zh},crop={W}:{H}:{(zw - W) // 2}:{(zh - H) // 2}"
-        parts.append(v + f",setsar=1[v{i}]")
+        crops = p.crops
+        if crops is None and p.zoom > 1.001:  # legacy: centred zoom per panel
+            crops = []
+            for y0, y1 in panels:
+                ph = y1 - y0
+                cw, ch = int(W / p.zoom) // 2 * 2, int(ph / p.zoom) // 2 * 2
+                crops.append((p.zoom, (W - cw) // 2, (ph - ch) // 2, cw, ch))
+        if crops and any(c[0] > 1.001 for c in crops):
+            k = len(panels)
+            v += f",split={k}" + "".join(f"[p{i}_{j}]" for j in range(k))
+            parts.append(v)
+            outs = []
+            for j, ((y0, y1), (z, x, y, cw, ch)) in enumerate(zip(panels, crops)):
+                ph = y1 - y0
+                f = f"[p{i}_{j}]crop={W}:{ph}:0:{y0}"
+                if z > 1.001:
+                    f += f",crop={cw}:{ch}:{x}:{y},scale={W}:{ph}:flags=lanczos"
+                parts.append(f + f"[q{i}_{j}]")
+                outs.append(f"[q{i}_{j}]")
+            parts.append("".join(outs) + (f"vstack=inputs={k}" if k > 1 else "null") + f",setsar=1[v{i}]")
+        else:
+            parts.append(v + f",setsar=1[v{i}]")
         parts.append(f"[ab{i}]atrim=start={p.s:.3f}:end={p.e:.3f},asetpts=PTS-STARTPTS,"
                      f"afade=t=in:d=0.01,afade=t=out:st={max(0.0, p.e - p.s - 0.01):.3f}:d=0.01[a{i}]")
     parts.append("".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[cut][cuta]")

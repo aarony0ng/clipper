@@ -59,6 +59,10 @@ campaigns:
       about the creators and the game, and should name at least one of them.
     # Sypher's facecam, measured on the VOD (1920x1080): auto-detect picked wrong crops.
     reframe: {mode: auto, facecam: [2, 412, 518, 320]}
+    # The other two POVs put their cams elsewhere (measured 2026-11-26 on 1920x1080).
+    reframe_by_channel:
+      replays: {mode: auto, facecam: [18, 345, 420, 232]}
+      maddynf: {mode: auto, facecam: [26, 262, 546, 298]}
     # Whisper mishears his name.
     caption_fixes: {Cypher: Sypher, "Cypher's": "Sypher's", Cypress: "Sypher's"}
     # Tastemaker: where top clips of similar content live. Shorts from SypherPK's own

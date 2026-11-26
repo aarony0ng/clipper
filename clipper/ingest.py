@@ -90,7 +90,7 @@ def ingest(
     meta = {
         "url": url,
         "title": info.get("title"),
-        "channel_url": channel_urls[0] or channel_urls[1],
+        "channel_url": next((u for u in channel_urls if u), None),
         "duration": info.get("duration"),
         "offset": section[0] if section else 0.0,
         "section": list(section) if section else None,

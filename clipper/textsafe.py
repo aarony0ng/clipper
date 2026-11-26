@@ -102,8 +102,49 @@ def _tesseract(img: np.ndarray) -> list[list[int]]:
     return boxes
 
 
+_VISION_SRC = Path(__file__).with_name("vision_text.swift")
+_VISION_BIN = Path(__file__).resolve().parents[1] / ".bin" / "vision_text"
+
+
+def _vision_bin() -> Path | None:
+    """Apple Vision text recognizer (macOS), compiled once from vision_text.swift."""
+    if _VISION_BIN.exists() and _VISION_BIN.stat().st_mtime >= _VISION_SRC.stat().st_mtime:
+        return _VISION_BIN
+    if not shutil.which("swiftc"):
+        return None
+    _VISION_BIN.parent.mkdir(exist_ok=True)
+    r = subprocess.run(["swiftc", "-O", str(_VISION_SRC), "-o", str(_VISION_BIN)], capture_output=True)
+    return _VISION_BIN if r.returncode == 0 else None
+
+
+def detect_many(imgs: list[np.ndarray], min_conf: float = 0.4) -> list[list[list[int]]]:
+    """Text boxes per image. Apple Vision when available (reads stylised game UI well);
+    otherwise Tesseract plus a white-glyph detector."""
+    import cv2
+    exe = _vision_bin()
+    if exe is None:
+        return [_merge(_ui_text(i) + _tesseract(i)) for i in imgs]
+    out = [[] for _ in imgs]
+    with tempfile.TemporaryDirectory() as d:
+        paths = []
+        for k, img in enumerate(imgs):
+            p = Path(d) / f"{k}.png"
+            cv2.imwrite(str(p), img)
+            paths.append(str(p))
+        r = subprocess.run([str(exe), *paths], capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        f = line.split(" ", 6)
+        if len(f) < 6:
+            continue
+        k, x0, y0, x1, y1, conf = int(f[0]), *map(int, f[1:5]), float(f[5])
+        text = f[6] if len(f) > 6 else ""
+        if conf >= min_conf and len(text.strip()) >= 1:
+            out[k].append([x0, y0, x1, y1])
+    return [_merge(b) for b in out]
+
+
 def detect_text(img: np.ndarray) -> list[list[int]]:
-    return _merge(_ui_text(img) + _tesseract(img))
+    return detect_many([img])[0]
 
 
 def _merge(boxes: list[list[int]], pad: int = 6) -> list[list[int]]:
@@ -122,6 +163,34 @@ def _merge(boxes: list[list[int]], pad: int = 6) -> list[list[int]]:
                 out.append(b)
         boxes = out
     return boxes
+
+
+def source_text(video: Path, times: list[float]) -> list[list[int]]:
+    """Text boxes in the source video (source pixels) at the given times."""
+    import cv2
+    imgs = []
+    for t in times:
+        p = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1",
+                            "-f", "image2pipe", "-vcodec", "png", "-"], capture_output=True)
+        if p.stdout:
+            img = cv2.imdecode(np.frombuffer(p.stdout, np.uint8), cv2.IMREAD_COLOR)
+            if img is not None:
+                imgs.append(img)
+    return [b for bs in detect_many(imgs) for b in bs] if imgs else []
+
+
+def clear_crop_x(boxes: list[list[int]], x: int, w: int, y: int, h: int, lo: int, hi: int,
+                 pad: int = 8) -> int:
+    """Nearest crop left edge in [lo, hi] whose sides don't cut through any text box."""
+    rows = [b for b in boxes if b[3] > y and b[1] < y + h]
+
+    def cuts(cx):
+        return sum(1 for b in rows if (b[0] - pad < cx < b[2] + pad) or (b[0] - pad < cx + w < b[2] + pad))
+
+    if not rows or not cuts(x) or hi < lo:
+        return x
+    best = min(range(lo, hi + 1, 2), key=lambda cx: (cuts(cx), abs(cx - x)))
+    return best
 
 
 # ---------------------------------------------------------------- zoom solver
@@ -247,10 +316,12 @@ def _inside_safe(box: list[int], style: str) -> bool:
 def cut_text(base: np.ndarray, out: np.ndarray, panels: list[tuple[int, int]],
              overlay: list[list[int]]) -> list[list[int]]:
     """Text boxes that touch a panel edge in the output but not in the unzoomed base frame."""
+    found = dict(zip(("base", "out"), detect_many([base, out])))
+
     def touching(img):
         res = []
         for y0, y1 in panels:
-            for b in panel_boxes(detect_text(img), y0, y1):
+            for b in panel_boxes(found["base" if img is base else "out"], y0, y1):
                 if b[0] <= EDGE or b[2] >= W - EDGE or b[1] <= EDGE or b[3] >= (y1 - y0) - EDGE:
                     res.append([b[0], b[1] + y0, b[2], b[3] + y0])
         return res
