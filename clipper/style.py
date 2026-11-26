@@ -24,6 +24,7 @@ class CaptionStyle(BaseModel):
     highlight_mode: Literal["color", "box", "none"] = "color"
     highlight_color: str = Field("#FFE500", description="#RRGGBB for the word being spoken")
     outline_px: int = Field(7, ge=0, le=16)
+    outline_color: str = Field("#000000", description="#RRGGBB of the text outline")
     pop_in: bool = Field(True, description="Small scale-up when a chunk appears")
 
 
