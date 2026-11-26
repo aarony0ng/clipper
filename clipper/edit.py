@@ -107,7 +107,9 @@ def plan(words: list[dict], clip_len: float, wav: Path | None, start: float, st:
         if st.zoom_every_s <= 0:
             p.zoom = 1.0
             continue
-        if audio.size and lv >= loud_line and lv > speech_db + st.reaction_db:
+        prev = pieces[pieces.index(p) - 1].zoom if p is not pieces[0] else 1.0
+        # Two punches in a row read as no cut at all, so the second one stays wide.
+        if audio.size and lv >= loud_line and lv > speech_db + st.reaction_db and prev != st.reaction_zoom:
             p.zoom = st.reaction_zoom
             z = True  # the next piece eases back out
             continue
