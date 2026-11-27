@@ -54,6 +54,9 @@ def connect(work_dir: Path) -> sqlite3.Connection:
     if "subcaption" not in cols:  # added with the tastemaker
         con.execute("ALTER TABLE moment ADD COLUMN subcaption TEXT")
         con.commit()
+    if "concept" not in cols:  # big-idea gate: the clip's one-line concept
+        con.execute("ALTER TABLE moment ADD COLUMN concept TEXT")
+        con.commit()
     return con
 
 

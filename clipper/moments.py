@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import db, signals as sig, transcribe
+from . import concept as big_idea, db, signals as sig, transcribe
 from .config import Campaign, Settings, guide_path
 from .style import StyleGuide, load as load_guide
 
@@ -144,7 +144,11 @@ def build_prompt(camp: Campaign, shortlist: list[Candidate], segments: list[dict
         "the campaign prohibits and anything that is not advertiser-safe.\n\n"
         "Hook text is 2 to 6 words, written like a caption a person would actually post, "
         "and never misrepresents what happens. Give one hook per variant and make the two "
-        "hooks take different angles (e.g. a quote from the clip versus a tease of the payoff)."
+        "hooks take different angles (e.g. a quote from the clip versus a tease of the payoff).\n\n"
+        "Every pick needs a `concept`: the clip's one big idea in 5 words or fewer, naming a "
+        "creator plus a superlative, a number, or clear stakes or payoff (e.g. \"Sypher's first "
+        "ever hole-in-one\"). If a moment can't be summed up like that, don't pick it. The first "
+        "hook is the concept; the second takes another angle."
     )
     rules = [
         f"Creator: {camp.creator}",
@@ -194,6 +198,8 @@ def rank_with_claude(settings: Settings, system: str, user: str, n: int) -> list
         start: float
         end: float
         title: str = Field(description="Short internal title for the moment")
+        concept: str = Field(description="The clip's big idea: <=5 words, a creator name plus a "
+                                         "superlative, number, or clear stakes/payoff")
         hooks: list[str] = Field(description="On-screen hook text, one per variant")
         subcaption: str = Field("", description="Persistent title line, if the style guide asks for one")
         rationale: str = Field(description="One or two sentences on why it will perform")
@@ -289,6 +295,17 @@ def rank(settings: Settings, camp: Campaign, source_id: str, n: int | None = Non
                      for c in shortlist[:n]]
             ranked_by = "heuristic"
 
+    # Big-idea gate: no concept, no clip.
+    kept = []
+    for p in picks:
+        ok, why = big_idea.check(p.get("concept", ""), camp)
+        if ok:
+            p["hooks"] = big_idea.hooks_from(p["concept"], p.get("hooks") or [])
+            kept.append(p)
+        else:
+            print(f"[moments] rejected {p.get('title', '')[:50]!r}: {why}")
+    picks = kept
+
     con.execute("DELETE FROM moment WHERE source_id=?", (source_id,))
     out = []
     for rank_i, p in enumerate(picks, 1):
@@ -301,7 +318,7 @@ def rank(settings: Settings, camp: Campaign, source_id: str, n: int | None = Non
             "start": round(start, 3), "end": round(end, 3), "score": p.get("score"),
             "title": p.get("title", ""), "hooks": p.get("hooks") or ["WATCH THIS"],
             "rationale": p.get("rationale", ""), "ranked_by": ranked_by, "status": "picked",
-            "subcaption": p.get("subcaption", ""),
+            "subcaption": p.get("subcaption", ""), "concept": p.get("concept", ""),
         }
         db.upsert(con, "moment", row)
         out.append(row)

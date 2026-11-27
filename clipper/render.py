@@ -542,6 +542,7 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
                 qa["cut_s"] = round(end - start - clip_len, 2)
                 qa["zooms"] = sum(any(c[0] > 1.001 for c in (p.crops or [])) for p in pieces)
                 status = "rendered" if qa["pass"] else "qa_failed"
+                write_post(out_dir / f"{cid}.post.md", cid, m, v, hook, hooks, camp, qa)
                 db.upsert(con, "clip", {"id": cid, "moment_id": m["id"], "variant": v, "path": str(out),
                                         "layout": layout.mode, "qa": qa, "status": status, "error": None})
                 print(f"[render] {cid}: {layout.mode} {qa['duration']}s ({qa['cuts']} cuts, "
@@ -555,6 +556,46 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
     db.set_status(con, "source", source_id, "rendered")
     write_review(settings, source_id, out_dir)
     return made
+
+
+def write_post(path: Path, cid: str, m, variant: int, hook: str, hooks: list[str], camp: Campaign,
+               qa: dict) -> Path:
+    """Per-clip submission checklist: caption to paste, the campaign rules that apply, ticks."""
+    pay = camp.payout or {}
+    concept = (m["concept"] if "concept" in m.keys() else "") or m["title"]
+    names = " ".join("@" + c.rstrip("/").rsplit("/", 1)[-1] for c in camp.channels)
+    tags = " ".join(camp.hashtags)
+    caption = " ".join(x for x in [concept.rstrip(".") + ".", names, tags, camp.disclosure] if x)
+    within = pay.get("submit_within_min")
+    lines = [
+        f"# Post checklist: {cid}", "",
+        f"- Concept: **{concept}**",
+        f"- Hook on this variant (v{variant}): **{hook}**",
+        f"- Recommended variant: v1 (the concept hook)" + ("" if variant == 1 else "; this is the alternative"),
+        f"- Automatic checks: {'passed' if qa.get('pass') else 'FAILED, do not post'}"
+        f" ({qa.get('duration')} s, {qa.get('integrated_lufs')} LUFS)", "",
+        "## Caption to paste", "", "```", caption, "```", "",
+        "## Campaign rules that apply", "",
+        f"- Campaign: {camp.id} ({camp.creator})",
+        f"- Pays ${pay.get('per_1k_views', '?')} per 1,000 views, only once a post reaches "
+        f"{pay.get('min_views', 0):,} views; ${pay.get('min_payout', '?')} minimum, ${pay.get('max_payout', '?')} cap per clip",
+        f"- Allowed platforms: {', '.join(pay.get('platforms', [])) or 'see campaign page'}",
+        f"- Submit each post's link at {camp.campaign_url or '(campaign URL missing in campaigns.yaml)'}"
+        + (f" within {within:g} minutes of posting" if within else ""),
+        f"- Rules page: {camp.rules_url or '(missing)'}",
+        f"- Required on screen: \"{camp.handle}\" and {camp.disclosure} for {camp.disclosure_seconds:g} s (burned in)",
+        "- Not allowed: " + "; ".join(camp.prohibited or ["nothing listed"]), "",
+        "## Tick list", "",
+        "- [ ] Watched the whole clip: every caption and on-screen text fully legible",
+        "- [ ] Passes the tastemaker bar (see the ranking); if not, don't post",
+        "- [ ] Caption pasted with hashtags and #ad",
+    ]
+    for plat in pay.get("platforms", []):
+        lines.append(f"- [ ] Posted on {plat}"
+                     + (f", link submitted within {within:g} min" if within else ", link submitted"))
+    lines += ["- [ ] Row added to work/revenue/ledger.csv (then views at 24 h / 72 h / 7 d)", ""]
+    path.write_text("\n".join(lines))
+    return path
 
 
 def write_review(settings: Settings, source_id: str, out_dir: Path | None = None) -> Path:
@@ -574,6 +615,7 @@ def write_review(settings: Settings, source_id: str, out_dir: Path | None = None
         name = Path(r["path"]).name
         cards.append(f"""<div class="c"><video src="{name}" controls preload="metadata"></video>
 <h3>#{r['rank']} v{r['variant']} · {r['end'] - r['start']:.0f}s · {r['layout']}</h3>
+<p><a href="{Path(name).stem}.post.md">post checklist</a></p>
 <p><b>{_html(r['title'])}</b></p><p>{_html(r['rationale'])}</p>
 <p class="m">ranked by {r['ranked_by']} · {r['start']:.1f}s–{r['end']:.1f}s in source ·
 {'checks passed' if qa.get('pass') else 'check: ' + _html(json.dumps(qa))}</p></div>""")

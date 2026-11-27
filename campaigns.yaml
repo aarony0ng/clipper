@@ -37,7 +37,8 @@ campaigns:
     #   Maddynf https://www.twitch.tv/videos/2929952825  0:25:00 - 2:22:00
     # Use --section to stay inside these windows.
     payout: {type: cpm, per_1k_views: 2.00, min_views: 10000, min_payout: 20, max_payout: 500,
-             budget: 7500, platforms: [tiktok, instagram_reels, youtube_shorts, x]}
+             budget: 7500, platforms: [tiktok, instagram_reels, youtube_shorts, x],
+             submit_within_min: 30}   # submit each post link on the campaign page within 30 min
     clip: {min_s: 20, max_s: 50}
     required:
       # The overlay must name at least one creator; this sits on screen for the whole clip.
