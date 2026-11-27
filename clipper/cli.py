@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("campaign")
     a.add_argument("url")
     a.add_argument("--section", help="only this part of the VOD, e.g. 1:02:00-1:32:00")
-    a.add_argument("--engine", choices=["whisper", "youtube"], default="whisper")
+    a.add_argument("--engine", choices=["auto", "mlx", "faster-whisper", "whisper", "youtube"], default="auto")
     a.add_argument("--scenes", action="store_true", help="also detect scene cuts (slower)")
     a.add_argument("-n", type=int, help="moments to render")
     a.add_argument("--no-claude", action="store_true")
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("campaign"); a.add_argument("path"); a.add_argument("--id", required=True)
 
     a = sub.add_parser("transcribe"); a.add_argument("source")
-    a.add_argument("--engine", choices=["whisper", "youtube"], default="whisper")
+    a.add_argument("--engine", choices=["auto", "mlx", "faster-whisper", "whisper", "youtube"], default="auto")
     a.add_argument("--force", action="store_true")
 
     a = sub.add_parser("signals"); a.add_argument("source")
@@ -65,6 +65,14 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--max-dur", type=float, default=90.0)
     a.add_argument("--min-views", type=int, default=10_000)
     a.add_argument("--force", action="store_true")
+
+    a = sub.add_parser("scan", help="scan several POV VODs of one group stream for the best moments")
+    a.add_argument("config", help="scan config JSON (see clipper/scan.py)")
+    a.add_argument("--top", type=int, default=24, help="peaks to shortlist")
+
+    a = sub.add_parser("ops", help="revenue loop: post sheet, view counts, calibration (never posts)")
+    a.add_argument("step", choices=["queue", "measure", "calibrate", "status"])
+    a.add_argument("--date", help="queue for this day (YYYY-MM-DD), default today")
 
     sub.add_parser("campaigns", help="list campaigns and whether they are licensed")
 
@@ -104,6 +112,20 @@ def main(argv: list[str] | None = None) -> int:
                              use_guide=not args.no_guide, tag=args.tag)
         name = f"{args.source}-{args.tag}" if args.tag else args.source
         print(f"Review: {settings.work_dir / 'clips' / name / 'review.html'}")
+    elif args.cmd == "scan":
+        from . import scan
+        scan.run(settings, Path(args.config), top=args.top)
+    elif args.cmd == "ops":
+        from datetime import date
+        from . import ops
+        if args.step == "queue":
+            ops.queue(settings, camps, Path(args.config), date.fromisoformat(args.date) if args.date else None)
+        elif args.step == "measure":
+            ops.measure(settings, camps)
+        elif args.step == "calibrate":
+            ops.calibrate(settings, camps)
+        else:
+            ops.status(settings, camps, Path(args.config))
     elif args.cmd == "taste":
         from . import taste
         camp = camps[args.campaign]

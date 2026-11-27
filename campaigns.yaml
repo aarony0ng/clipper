@@ -37,7 +37,8 @@ campaigns:
     #   Maddynf https://www.twitch.tv/videos/2929952825  0:25:00 - 2:22:00
     # Use --section to stay inside these windows.
     payout: {type: cpm, per_1k_views: 2.00, min_views: 10000, min_payout: 20, max_payout: 500,
-             budget: 7500, platforms: [tiktok, instagram_reels, youtube_shorts, x]}
+             budget: 7500, platforms: [tiktok, instagram_reels, youtube_shorts, x],
+             submit_within_min: 30}   # submit each post link on the campaign page within 30 min
     clip: {min_s: 20, max_s: 50}
     required:
       # The overlay must name at least one creator; this sits on screen for the whole clip.
@@ -59,8 +60,17 @@ campaigns:
       about the creators and the game, and should name at least one of them.
     # Sypher's facecam, measured on the VOD (1920x1080): auto-detect picked wrong crops.
     reframe: {mode: auto, facecam: [2, 412, 518, 320]}
+    # The other two POVs put their cams elsewhere (measured 2026-11-26 on 1920x1080).
+    reframe_by_channel:
+      replays: {mode: auto, facecam: [18, 345, 420, 232]}
+      maddynf: {mode: auto, facecam: [26, 262, 546, 298]}
     # Whisper mishears his name.
     caption_fixes: {Cypher: Sypher, "Cypher's": "Sypher's", Cypress: "Sypher's"}
+    # Revenue loop (clipper ops). Run by Reach (reachclipping.com): blocked until Aaron gets
+    # Reach's answer on whether our automated edits count as AI content, then sets this true.
+    gate: 7.5
+    reach_run: true
+    reach_ai_content_ok: false
     # Tastemaker: where top clips of similar content live. Shorts from SypherPK's own
     # channel plus searches; the tastemaker keeps the most-viewed ones under 90 s.
     taste_sources:
@@ -109,4 +119,54 @@ campaigns:
     clip: {min_s: 15, max_s: 60}
     required: {disclosure: "#ad"}
     brief: ""
+    reframe: {mode: auto}
+
+  # Added 2026-11-26 at Aaron's request. NOT joined: licensed stays false until Aaron is in
+  # and we've read the full rules (unlocked after joining). Neither brief mentions AI or
+  # automated editing, and neither is run by Reach, so reach_ai_content_ok doesn't apply.
+  - id: faze-tournament
+    creator: FaZe Clan (FaZe Flank Invitational)
+    licensed: false
+    campaign_url: https://clippingalpha.com/campaigns/faze-tournament/clipping
+    rules_url: ""                # unlocked after the application is accepted
+    channels: []                 # footage is private: the campaign's 8 clips only
+    payout: {type: cpm, per_1k_views: 2.00, min_payout: 10,
+             platforms: [tiktok, instagram_reels, youtube_shorts, x]}
+    clip: {min_s: 15, max_s: 60}
+    required: {disclosure: "#ad"}
+    application_required: true
+    footage: "only the 8 private clips of the FaZe Flank Invitational CoD broadcast (Nov 10-12); no outside footage"
+    logo_overlay: {path: assets/logos/faze-flank.png, corner: top-right, width: 200}   # PLACEHOLDER: add the logo file
+    notes:
+      - "Run by ClippedIn. Audience: about 60% US viewers wanted."
+      - "On-screen captions required (the clipper burns them in)."
+    brief: |
+      FaZe Flank Invitational (Call of Duty), Nov 10-12. Clip only the 8 private broadcast
+      clips the campaign provides. FaZe Flank logo on every clip, on-screen captions.
+    reframe: {mode: auto}
+
+  - id: stream-house-la
+    creator: Stream House LA (Chicken Wrap Entertainment)
+    licensed: false
+    campaign_url: https://clippingalpha.com/campaigns/motion-clipping/house-la
+    rules_url: ""
+    channels: []                 # footage comes from the campaign's Google Drive folder
+    payout: {type: cpm, per_1k_views: {tiktok: 2.00, instagram_reels: 2.00, youtube_shorts: 0.50},
+             platforms: [tiktok, instagram_reels, youtube_shorts]}
+    clip: {min_s: 15, max_s: 60}
+    required:
+      hashtags: ["#streamhouselacwe", "#streamhousela", "#cwetv", "#chickenwrapentertainment"]
+      disclosure: "#ad"
+    mentions: ["@streamhousela"]
+    footage: "Google Drive folder of raw stream VODs plus the podcast; current weekly episode only"
+    title_on_screen: true
+    cta_text: "FULL STREAM @STREAMHOUSELA"   # placeholder wording; check the brief's preferred CTA
+    stories_per_clip: true
+    min_followers: 2000          # or an account dedicated to this campaign (dedicated_to in accounts.yaml)
+    min_account_age_h: 24
+    notes:
+      - "Run by Motion Clipping. Views from the US, UK and Canada."
+    brief: |
+      Stream House LA: clip the current week's raw stream VODs and podcast only. Every clip
+      needs an on-screen title and a call to action.
     reframe: {mode: auto}

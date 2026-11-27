@@ -1,12 +1,20 @@
 """Stage 3a: word-level transcript.
 
-Default engine is faster-whisper (a Whisper reimplementation that runs well on
-CPU). If the VOD came with YouTube auto-captions, `engine="youtube"` uses
-those instead: lower quality, but free and instant.
+Engines:
+- "mlx": mlx-whisper on the Apple Silicon GPU (default model
+  mlx-community/whisper-large-v3-turbo). The default on arm64 macOS when
+  mlx-whisper is installed (`pip install mlx-whisper`).
+- "faster-whisper": CPU (or CUDA) Whisper. The fallback everywhere else.
+- "youtube": the VOD's YouTube auto-captions; lower quality, but free and instant.
+"whisper" / "auto" picks mlx when available, else faster-whisper.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
+import platform
+import sys
+import time
 from pathlib import Path
 
 from . import db
@@ -27,14 +35,68 @@ def transcribe(settings: Settings, source_id: str, engine: str = "whisper", forc
         segments = _from_youtube_json3(sdir, meta.get("offset", 0.0), src["duration"])
         label = "youtube-auto-captions"
     else:
-        segments = _whisper(sdir / "audio.wav", settings)
-        label = f"faster-whisper:{settings.whisper_model}"
+        segments, label = asr(sdir / "audio.wav", settings, engine)
 
     out.write_text(json.dumps({"engine": label, "segments": segments}, ensure_ascii=False))
     db.set_status(con, "source", source_id, "transcribed")
     n_words = sum(len(s["words"]) for s in segments)
     print(f"[transcribe] {source_id}: {len(segments)} segments, {n_words} words ({label})")
     return out
+
+
+def mlx_available() -> bool:
+    return (sys.platform == "darwin" and platform.machine() == "arm64"
+            and importlib.util.find_spec("mlx_whisper") is not None)
+
+
+def asr(wav: Path, settings: Settings, engine: str = "auto") -> tuple[list[dict], str]:
+    """Speech-to-text with word timestamps. Returns (segments, engine label)."""
+    if engine in ("auto", "whisper"):
+        engine = settings.transcribe_engine
+    if engine == "auto":
+        engine = "mlx" if mlx_available() else "faster-whisper"
+    if engine == "mlx" and not mlx_available():
+        print("[transcribe] mlx-whisper not available here; using faster-whisper")
+        engine = "faster-whisper"
+    t0 = time.time()
+    if engine == "mlx":
+        segs, label = _mlx(wav, settings), f"mlx:{settings.mlx_model}"
+    else:
+        segs, label = _whisper(wav, settings), f"faster-whisper:{settings.whisper_model}"
+    dur = _wav_seconds(wav)
+    took = time.time() - t0
+    print(f"[transcribe] {label}: {dur / 60:.1f} min of audio in {took / 60:.1f} min "
+          f"({dur / max(took, 1e-6):.1f}x realtime)")
+    return segs, label
+
+
+def _wav_seconds(wav: Path) -> float:
+    import wave
+    with wave.open(str(wav), "rb") as wf:
+        return wf.getnframes() / wf.getframerate()
+
+
+def _load_pcm(wav: Path):
+    import wave
+    import numpy as np
+    with wave.open(str(wav), "rb") as wf:
+        pcm = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+    return pcm.astype(np.float32) / 32768.0
+
+
+def _mlx(wav: Path, settings: Settings) -> list[dict]:
+    import mlx_whisper
+
+    res = mlx_whisper.transcribe(_load_pcm(wav), path_or_hf_repo=settings.mlx_model,
+                                 word_timestamps=True, condition_on_previous_text=False,
+                                 language=settings.language or None)
+    segments = []
+    for seg in res.get("segments", []):
+        words = [{"s": round(float(w["start"]), 3), "e": round(float(w["end"]), 3), "w": w["word"].strip()}
+                 for w in (seg.get("words") or []) if w["word"].strip()]
+        if words:
+            segments.append({"s": words[0]["s"], "e": words[-1]["e"], "text": seg["text"].strip(), "words": words})
+    return segments
 
 
 def _whisper(wav: Path, settings: Settings) -> list[dict]:

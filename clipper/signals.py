@@ -58,9 +58,50 @@ def loudness(wav: Path, hop: float = 1.0) -> np.ndarray:
     return np.array(vals)
 
 
+# Chat reactions worth more than a plain message: laughs, hype, "clip it".
+CHAT_SPAM = re.compile(
+    r"\b(kekw|lul|lulw|omegalul|lmao+|lmfao|lol+|(?:ha){2,}|icant|pog\w*|w+|l+|clip\s*(?:it|that)|"
+    r"no\s*way|holy|sheesh)\b", re.I)
+
+
+BOTS = {"nightbot", "streamelements", "moobot", "fossabot", "streamlabs", "wizebot", "sery_bot",
+        "soundalerts", "pokemoncommunitygame", "commanderroot"}
+
+
+def twitch_chat(path: Path, start: float, n: int, delay: float = 6.0) -> dict[str, np.ndarray]:
+    """Per-second chat signals from a TwitchDownloaderCLI chat JSON, for VOD seconds
+    [start, start + n). Chat lags the moment by a few seconds (stream delay plus typing),
+    so messages are moved `delay` seconds earlier."""
+    d = json.loads(Path(path).read_text())
+    msgs = np.zeros(n)
+    spam = np.zeros(n)
+    clip_it = np.zeros(n)
+    users: list[set] = [set() for _ in range(n)]
+    for c in d.get("comments", []):
+        t = int(float(c.get("content_offset_seconds", 0)) - delay - start)
+        if not 0 <= t < n:
+            continue
+        body = ((c.get("message") or {}).get("body") or "")
+        who = ((c.get("commenter") or {}).get("name") or "").lower()
+        if who in BOTS or who.endswith("bot"):   # timers like "If you see a funny moment - CLIP IT"
+            continue
+        msgs[t] += 1
+        spam[t] += len(CHAT_SPAM.findall(body))
+        clip_it[t] += bool(re.search(r"\bclip\s*(it|that)\b", body, re.I))
+        users[t].add((c.get("commenter") or {}).get("_id") or (c.get("commenter") or {}).get("name"))
+    uniq = np.zeros(n)
+    for i in range(n):  # unique chatters over a 10 s window
+        uniq[i] = len(set().union(*users[max(0, i - 5):i + 5]))
+    return {"msgs": msgs, "spam": spam, "clip_it": clip_it, "unique10": uniq}
+
+
 def chat_velocity(sdir: Path, offset: float, n: int) -> np.ndarray | None:
     files = list(sdir.glob("*.live_chat.json"))
     if not files:
+        tw = list(sdir.glob("chat*.json"))  # Twitch chat from TwitchDownloaderCLI
+        if tw:
+            c = twitch_chat(tw[0], offset, n)
+            return c["msgs"] + 2.0 * c["spam"] + 5.0 * c["clip_it"]
         return None
     counts = np.zeros(n)
     with open(files[0], encoding="utf-8") as f:

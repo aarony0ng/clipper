@@ -51,6 +51,21 @@ class SubcaptionStyle(BaseModel):
     from_s: float = Field(0.0, ge=0.0, description="When it appears (after the hook, usually)")
 
 
+class EditStyle(BaseModel):
+    """Fast cuts: jump cuts over dead air and punch-in zooms. On by default (house rule since 2026-11-26)."""
+    enabled: bool = True
+    jump_cuts: bool = True
+    max_gap_s: float = Field(0.35, ge=0.1, le=3.0, description="Quiet pauses longer than this are cut")
+    keep_gap_s: float = Field(0.12, ge=0.0, le=1.0, description="Pause left after a jump cut")
+    quiet_db: float = Field(8.0, ge=0.0, le=30.0,
+                            description="A pause is cut only if it is this many dB below the speech level")
+    max_cut_share: float = Field(0.3, ge=0.0, le=0.6, description="Most of the clip that jump cuts may remove")
+    zoom_every_s: float = Field(3.0, ge=0.0, le=10.0, description="A cut (zoom change) about this often; 0 = no zooms")
+    zoom_amount: float = Field(1.12, ge=1.0, le=1.5, description="Punch-in on alternate cuts")
+    reaction_zoom: float = Field(1.25, ge=1.0, le=1.6, description="Punch-in on loud reaction pieces")
+    reaction_db: float = Field(4.0, ge=0.0, le=20.0, description="How much louder than speech a reaction must be")
+
+
 class Pacing(BaseModel):
     min_s: float = 15.0
     max_s: float = 60.0
@@ -63,6 +78,7 @@ class StyleGuide(BaseModel):
     hook: HookStyle = HookStyle()
     subcaption: SubcaptionStyle = SubcaptionStyle()
     pacing: Pacing = Pacing()
+    edit: EditStyle = EditStyle()
     layout_preference: str = Field("auto", description="auto | facecam_split | track | center | blur_pad")
     moment_rules: list[str] = Field(default_factory=list, description="What to pick, for the moment picker")
     hook_rules: list[str] = Field(default_factory=list, description="How to write on-screen hooks")

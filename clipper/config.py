@@ -54,6 +54,30 @@ class Campaign:
     taste_sources: list[str] = field(default_factory=list)
     style_guide: str = ""
     reframe: Reframe = field(default_factory=Reframe)
+    # Revenue loop (clipper ops): minimum tastemaker score to post (never below 7.0), and
+    # Reach-run campaigns stay blocked until Aaron confirms our edits aren't "AI content".
+    gate: float = 7.5
+    reach_run: bool = False
+    reach_ai_content_ok: bool = False
+    # Per-campaign extras (see campaigns.yaml for examples)
+    logo_overlay: dict[str, Any] | None = None   # {path, corner: top-left|top-right|bottom-left|bottom-right, width}
+    cta_text: str = ""                            # call to action burned in over the last seconds
+    cta_seconds: float = 4.0
+    title_on_screen: bool = False                 # the clip's concept stays on screen as a title
+    mentions: list[str] = field(default_factory=list)   # @handles for the post caption
+    stories_per_clip: bool = False                # campaign wants a story per posted clip
+    min_account_age_h: float = 0.0                # an account must be this old before its first post
+    min_followers: int = 0                        # ... and have this many followers, unless dedicated
+    application_required: bool = False
+    footage: str = ""                             # where the allowed source footage comes from
+    notes: list[str] = field(default_factory=list)
+    # Per-channel overrides for group streams where each POV has its own facecam spot,
+    # keyed by channel login (e.g. {"replays": Reframe(...)}).
+    reframe_by_channel: dict[str, Reframe] = field(default_factory=dict)
+
+    def reframe_for(self, channel_url: str | None) -> Reframe:
+        login = _norm_channel(channel_url or "").rsplit("/", 1)[-1]
+        return self.reframe_by_channel.get(login, self.reframe)
 
     def channel_matches(self, *urls: str | None) -> bool:
         """True if any of the given channel/uploader URLs is on this campaign's list."""
@@ -73,6 +97,10 @@ class Settings:
     work_dir: Path
     whisper_model: str = "small"
     whisper_device: str = "auto"
+    # "auto": mlx-whisper on Apple Silicon when installed, else faster-whisper.
+    transcribe_engine: str = "auto"
+    mlx_model: str = "mlx-community/whisper-large-v3-turbo"
+    language: str = "en"
     claude_model: str = "claude-opus-5-5"
     clips_per_source: int = 5
     variants_per_moment: int = 2
@@ -95,6 +123,7 @@ def load(path: str | Path) -> tuple[Settings, dict[str, Campaign]]:
         clip = c.pop("clip", {}) or {}
         req = c.pop("required", {}) or {}
         rf = Reframe(**(c.pop("reframe", {}) or {}))
+        rf_by = {k.lower(): Reframe(**v) for k, v in (c.pop("reframe_by_channel", {}) or {}).items()}
         camp = Campaign(
             id=c.pop("id"),
             creator=c.pop("creator"),
@@ -107,6 +136,7 @@ def load(path: str | Path) -> tuple[Settings, dict[str, Campaign]]:
             disclosure=req.get("disclosure", ""),
             disclosure_seconds=float(req.get("disclosure_seconds", 3.0)),
             reframe=rf,
+            reframe_by_channel=rf_by,
             **c,
         )
         campaigns[camp.id] = camp
