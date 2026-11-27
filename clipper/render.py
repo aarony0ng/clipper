@@ -254,7 +254,7 @@ Style: Cap,{font},{c.font_size},{ass_color(c.text_color)},{ass_color(c.text_colo
 Style: Hook,{font},{hk.font_size},{ass_color(hk.text_color)},{ass_color(hk.text_color)},{ass_color(hk.box_color) if hook_box else "&H00000000"},{ass_color(hk.box_color) if hook_box else "&H80000000"},-1,0,0,0,100,100,0,0,{3 if hook_box else 1},{18 if hook_box else 8},0,5,80,80,0,1
 Style: Sub,{font},{sc.font_size},{ass_color(sc.text_color)},{ass_color(sc.text_color)},{ass_color(sc.box_color) if sub_box else "&H00000000"},{ass_color(sc.box_color) if sub_box else "&H80000000"},-1,0,0,0,100,100,0,0,{3 if sub_box else 1},{14 if sub_box else 6},0,5,80,80,0,1
 Style: Disc,{font},40,&H00FFFFFF,&H00FFFFFF,&H99000000,&H99000000,-1,0,0,0,100,100,0,0,3,10,0,8,60,60,0,1
-Style: Handle,{font},38,&H40FFFFFF,&H40FFFFFF,&H80000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,5,60,60,0,1
+Style: Handle,{font},38,&H00FFFFFF,&H00FFFFFF,&H60000000,&H60000000,-1,0,0,0,100,100,0,0,3,8,0,5,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

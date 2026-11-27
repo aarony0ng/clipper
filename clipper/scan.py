@@ -126,7 +126,7 @@ def fetch_clip_audio(url: str, out: Path) -> Path | None:
 def run(settings: Settings, cfg_path: Path, top: int = 24) -> Path:
     cfg = json.loads(cfg_path.read_text())
     root = Path(__file__).resolve().parents[1]  # repo root; config paths are relative to it
-    out_dir = (settings.work_dir if settings.work_dir.is_absolute() else root / settings.work_dir) / "scan" / cfg["name"]
+    out_dir = Path(cfg_path).resolve().parent / cfg["name"]   # next to the scan config
     out_dir.mkdir(parents=True, exist_ok=True)
     povs = cfg["povs"]
     w0 = min(p["vod_start_ts"] + p["start"] for p in povs)
@@ -146,6 +146,16 @@ def run(settings: Settings, cfg_path: Path, top: int = 24) -> Path:
             m = min(len(v), N - shift)
             arr[shift:shift + m] = v[:m]
             g[k] = arr
+        if p.get("chat") and (root / p["chat"]).exists():
+            from .signals import twitch_chat
+            c = twitch_chat(root / p["chat"], p["start"], len(f["loud_z"]))
+            for k, v in c.items():
+                arr = np.full(N, np.nan)
+                m = min(len(v), N - shift)
+                arr[shift:shift + m] = v[:m]
+                g["chat_" + k] = arr
+            print(f"[scan] {p['name']}: chat {int(c['msgs'].sum())} messages, "
+                  f"{int(c['spam'].sum())} laugh/hype tokens, {int(c['clip_it'].sum())} 'clip it'")
         feats[p["name"]] = g
         print(f"[scan] {p['name']}: {len(segs)} segments, {len(f['loud_z'])}s")
 
@@ -158,6 +168,24 @@ def run(settings: Settings, cfg_path: Path, top: int = 24) -> Path:
     together = srt[:2].mean(axis=0) if len(names) > 1 else srt[0]   # several POVs at once
     talk = np.nanmean(np.vstack([feats[n]["words"] for n in names]), axis=0)
     score = 1.2 * together + 0.6 * srt[0] + 0.3 * np.clip(np.nan_to_num(talk) - 2, 0, 3)
+
+    # Chat: all three POVs' chats react to the same moment, so pool them. Messages and unique
+    # chatters as z-scores over a 10 s window, plus laugh/hype spam and "clip it".
+    chat_keys = [k for k in ("chat_msgs", "chat_unique10", "chat_spam", "chat_clip_it")
+                 if any(k in feats[n] for n in names)]
+    chat_score = np.zeros(N)
+    if chat_keys:
+        def pooled(k):
+            return np.nansum(np.vstack([feats[n].get(k, np.zeros(N)) for n in names]), axis=0)
+        # Counts over a 20 s window. Chat here is sparse (about 1 message every 10 s per channel),
+        # so it's weighted to nudge the score (max about 5), not to dominate it.
+        win = np.ones(20)
+        msgs = np.convolve(pooled("chat_msgs"), win, "same")
+        spam = np.convolve(pooled("chat_spam"), win, "same")
+        clip_it = np.convolve(pooled("chat_clip_it"), np.ones(15), "same")
+        chat_score = (0.5 * np.clip(_robust_z(msgs), 0, 4) + 0.8 * np.clip(spam, 0, 4)
+                      + 2.0 * np.clip(clip_it, 0, 2))
+        score = score + chat_score
 
     # viewer clips: align each to its POV and add a strong boost over the clipped span
     clips = []
@@ -203,6 +231,7 @@ def run(settings: Settings, cfg_path: Path, top: int = 24) -> Path:
         spiking = [n for n in names if per[n] > 1.5]
         vc = [c for c in clips if c["wall"] - 10 <= i <= c["wall"] + c["dur"] + 10]
         row = {"rank": rank, "wall": i, "score": round(float(sm[i]), 2), "best_pov": best,
+               "chat": round(float(chat_score[max(0, i - 5):i + 6].max()), 2),
                "pov_react": {k: round(v, 2) for k, v in per.items()}, "spiking": spiking,
                "viewer_clips": [{"title": c["title"], "views": c["views"]} for c in vc],
                "pov_seconds": {p["name"]: round(pov_time(p, i), 1) for p in povs}}
