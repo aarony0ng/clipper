@@ -234,7 +234,7 @@ def chunk_words(words: list[dict], max_words: int = 3, max_dur: float = 1.4) -> 
 
 
 def build_ass(words: list[dict], clip_len: float, layout: Layout, hook: str, camp: Campaign,
-              settings: Settings, guide: StyleGuide | None = None, subcaption: str = "") -> str:
+              settings: Settings, guide: StyleGuide | None = None, subcaption: str = "", title: str = "") -> str:
     g = guide or StyleGuide()
     c, hk, sc = g.caption, g.hook, g.subcaption
     font = settings.caption_font
@@ -253,6 +253,8 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Cap,{font},{c.font_size},{ass_color(c.text_color)},{ass_color(c.text_color)},{ass_color(c.outline_color)},&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline_px},3,5,60,60,0,1
 Style: Hook,{font},{hk.font_size},{ass_color(hk.text_color)},{ass_color(hk.text_color)},{ass_color(hk.box_color) if hook_box else "&H00000000"},{ass_color(hk.box_color) if hook_box else "&H80000000"},-1,0,0,0,100,100,0,0,{3 if hook_box else 1},{18 if hook_box else 8},0,5,80,80,0,1
 Style: Sub,{font},{sc.font_size},{ass_color(sc.text_color)},{ass_color(sc.text_color)},{ass_color(sc.box_color) if sub_box else "&H00000000"},{ass_color(sc.box_color) if sub_box else "&H80000000"},-1,0,0,0,100,100,0,0,{3 if sub_box else 1},{14 if sub_box else 6},0,5,80,80,0,1
+Style: Title,{font},52,&H00FFFFFF,&H00FFFFFF,&H70000000,&H70000000,-1,0,0,0,100,100,0,0,3,12,0,5,90,90,0,1
+Style: Cta,{font},50,&H00111111,&H00111111,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,14,0,5,90,90,0,1
 Style: Disc,{font},40,&H00FFFFFF,&H00FFFFFF,&H99000000,&H99000000,-1,0,0,0,100,100,0,0,3,10,0,8,60,60,0,1
 Style: Handle,{font},38,&H00FFFFFF,&H00FFFFFF,&H60000000,&H60000000,-1,0,0,0,100,100,0,0,3,8,0,5,60,60,0,1
 
@@ -297,6 +299,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if t0 < clip_len and words_:
             ev.append(f"Dialogue: 2,{_ts(t0)},{_ts(clip_len)},Sub,,0,0,0,,"
                       f"{{\\an5\\pos(540,{sub_y})\\fad(120,0)}}{_ass_escape(' '.join(words_))}")
+    if title and camp.title_on_screen:
+        # The campaign wants a title on every clip: the concept, after the hook has had its moment.
+        t0 = hook_end if hook else 0.0
+        ev.append(f"Dialogue: 2,{_ts(t0)},{_ts(clip_len)},Title,,0,0,0,,"
+                  f"{{\\an5\\pos(540,250)\\fad(150,0)}}{_ass_escape(title)}")
+    if camp.cta_text:
+        t0 = max(0.0, clip_len - camp.cta_seconds)
+        ev.append(f"Dialogue: 4,{_ts(t0)},{_ts(clip_len)},Cta,,0,0,0,,"
+                  f"{{\\an5\\pos(540,{H - 420})\\fad(150,0)}}{_ass_escape(camp.cta_text)}")
     if camp.disclosure:
         ev.append(f"Dialogue: 4,{_ts(0)},{_ts(min(camp.disclosure_seconds, clip_len))},Disc,,0,0,0,,"
                   f"{{\\an8\\pos(540,165)}}{_ass_escape(camp.disclosure)}")
@@ -337,8 +348,9 @@ def words_in(segments: list[dict], start: float, end: float) -> list[dict]:
 # ---------------------------------------------------------------- render + checks
 
 def render_clip(video: Path, out: Path, start: float, end: float, layout: Layout, ass_path: Path,
-                pieces: list | None = None) -> None:
-    """`pieces` (edit.plan) applies jump cuts and zooms before the captions are burned in."""
+                pieces: list | None = None, logo: dict | None = None) -> None:
+    """`pieces` (edit.plan) applies jump cuts and zooms before the captions are burned in.
+    `logo` (place_logo) is overlaid last, in a text-safe corner."""
     dur = end - start
     if pieces and (len(pieces) > 1 or pieces[0].zoom > 1.001):
         cut_dur = edit.length(pieces)
@@ -351,9 +363,15 @@ def render_clip(video: Path, out: Path, start: float, end: float, layout: Layout
         f"[0:a]loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:d=0.04,"
         f"afade=t=out:st={max(0.0, dur - 0.3):.2f}:d=0.3,aresample=48000[a]"
     )
+    extra_in = []
+    if logo and logo.get("status") == "ok":
+        fc = fc.replace("[v];", "[v0];", 1)
+        fc += (f";[1:v]scale={logo['w']}:-1[lg];[v0][lg]overlay={logo['x']}:{logo['y']}:format=auto[v]")
+        extra_in = ["-loop", "1", "-i", str(Path(logo["path"]).resolve())]
     cmd = [
-        "ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-i", str(video.resolve()), "-t", f"{dur:.3f}",
-        "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
+        "ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-i", str(video.resolve()), *extra_in,
+        "-t", f"{dur:.3f}",
+        "-filter_complex", fc, "-map", "[v]", "-map", "[a]", "-shortest",
         "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out.resolve()),
     ]
@@ -374,10 +392,11 @@ def text_safe_crops(video: Path, start: float, layout: Layout, pieces: list) -> 
                    for y0, y1 in panels]
 
 
-def place_hook(ass: Path, video: Path, start: float, layout: Layout) -> int:
-    """Move the hook so it never sits on top of on-screen game text (banners, scores).
-    Returns how far it moved (px)."""
-    meas = [e for e in textsafe.overlay_boxes(ass) if e["style"] == "Hook" and e["box"]]
+def place_hook(ass: Path, video: Path, start: float, layout: Layout, style: str = "Hook",
+               times: list[float] | None = None) -> int:
+    """Move an overlay (the hook, or the CTA) so it never sits on top of on-screen game text
+    (banners, scores, menus) while it's shown. Returns how far it moved (px)."""
+    meas = [e for e in textsafe.overlay_boxes(ass) if e["style"] == style and e["box"]]
     if not meas:
         return 0
     line, (x0, y0, x1, y1) = meas[0]["line"], meas[0]["box"]
@@ -385,10 +404,12 @@ def place_hook(ass: Path, video: Path, start: float, layout: Layout) -> int:
     if not m:
         return 0
     cur = int(m.group(1))
-    frames = textsafe.base_frames(video, start, layout.filter, [0.3, 1.2, 2.2])
+    times = times or [0.3, 1.2, 2.2]
+    frames = textsafe.base_frames(video, start, layout.filter, times)
     game = [b for bs in textsafe.detect_many(list(frames.values())) for b in bs]
     others = [e["box"] for e in textsafe.overlay_boxes(ass)
-              if e["box"] and e["style"] in ("Cap", "Handle", "Sub") and _active(e["line"], 1.0)]
+              if e["box"] and e["style"] in ("Cap", "Handle", "Sub", "Title") and e["style"] != style
+              and any(_active(e["line"], t) for t in times)]
     half_up, half_dn = cur - y0, y1 - cur
     lo = (layout.panels[-1][0] if layout.panels else 0) + half_up + 20
     lo = max(lo, textsafe.SAFE_TOP + half_up)
@@ -405,7 +426,7 @@ def place_hook(ass: Path, video: Path, start: float, layout: Layout) -> int:
     if clash(best) >= clash(cur):
         return 0
     text = ass.read_text()
-    for e in [e for e in textsafe.overlay_boxes(ass) if e["style"] == "Hook"]:
+    for e in [e for e in textsafe.overlay_boxes(ass) if e["style"] == style]:
         text = text.replace(e["line"], e["line"].replace(f"\\pos(540,{cur})", f"\\pos(540,{best})"), 1)
     ass.write_text(text)
     return best - cur
@@ -437,6 +458,37 @@ def _active(line: str, t: float) -> bool:
         h, m, s_ = x.split(":")
         return int(h) * 3600 + int(m) * 60 + float(s_)
     return sec(f[1]) <= t <= sec(f[2])
+
+
+def place_logo(camp: Campaign, ass: Path) -> dict:
+    """Where the campaign's logo goes: its corner inside the safe area, clear of our own text.
+    status: none (no logo asked), ok, missing (file not there yet: clip fails QA), blocked."""
+    lo = camp.logo_overlay
+    if not lo:
+        return {"status": "none"}
+    path = Path(lo.get("path", ""))
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[1] / path
+    if not path.exists():
+        print(f"[render] campaign logo not found at {path}: clip will fail QA until it's added")
+        return {"status": "missing", "path": str(path)}
+    import cv2
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return {"status": "missing", "path": str(path)}
+    w = int(lo.get("width", 180))
+    h = int(round(img.shape[0] * w / img.shape[1]))
+    ours = [e["box"] for e in textsafe.overlay_boxes(ass) if e["box"]]
+    corners = [lo.get("corner", "top-right"), "top-right", "top-left", "bottom-right", "bottom-left"]
+    for corner in dict.fromkeys(corners):
+        x = textsafe.SAFE_X if "left" in corner else W - textsafe.SAFE_X - w
+        ys = (range(textsafe.SAFE_TOP + 70, textsafe.SAFE_TOP + 400, 20) if "top" in corner
+              else range(textsafe.SAFE_BOTTOM - h, textsafe.SAFE_BOTTOM - h - 400, -20))
+        for y in ys:
+            rect = [x - 10, y - 10, x + w + 10, y + h + 10]
+            if not any(b[0] < rect[2] and rect[0] < b[2] and b[1] < rect[3] and rect[1] < b[3] for b in ours):
+                return {"status": "ok", "path": str(path), "x": x, "y": y, "w": w, "corner": corner}
+    return {"status": "blocked", "path": str(path)}
 
 
 def contact_sheet(clip: Path, out: Path, dur: float, n: int = 6) -> None:
@@ -514,13 +566,21 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
                 text_safe_crops(video, start, layout, pieces)
             clip_len = edit.length(pieces)
             ass.write_text(build_ass(edit.remap(words, pieces), clip_len, layout, hook, camp, settings,
-                                     guide=guide, subcaption=m["subcaption"] or ""))
+                                     guide=guide, subcaption=m["subcaption"] or "",
+                                     title=(m["concept"] if "concept" in m.keys() else "") or m["title"]))
             fit = textsafe.fit_overlay(ass, {"Cap": guide.caption.font_size, "Hook": guide.hook.font_size,
-                                             "Sub": guide.subcaption.font_size, "Disc": 40, "Handle": 38})
+                                             "Sub": guide.subcaption.font_size, "Disc": 40, "Handle": 38,
+                                             "Title": 52, "Cta": 50})
+            logo = place_logo(camp, ass)
+            fit["logo"] = logo["status"]
             fit["hook_moved"] = place_hook(ass, video, start, layout)
+            if camp.cta_text:  # CTA: last seconds of the cut; source times approximated by scale
+                k = (end - start) / max(clip_len, 0.1)
+                fit["cta_moved"] = place_hook(ass, video, start, layout, "Cta",
+                                              [(clip_len - x) * k for x in (camp.cta_seconds - 0.3, 2.0, 0.4)])
             try:
                 for attempt in range(3):
-                    render_clip(video, out, start, end, layout, ass, pieces)
+                    render_clip(video, out, start, end, layout, ass, pieces, logo)
                     cut = zoom_qa(video, out, start, layout, pieces, ass)
                     if not cut:
                         break
@@ -536,7 +596,8 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
                 qa.update(fit)
                 qa["zoom_text_cuts"] = len(cut)
                 qa["layout_text_cuts"] = layout.text_cut
-                qa["pass"] = qa["pass"] and fit["overlay_ok"] and not cut and not layout.text_cut
+                qa["pass"] = (qa["pass"] and fit["overlay_ok"] and not cut and not layout.text_cut
+                              and logo["status"] in ("none", "ok"))
                 qa["layout_note"] = layout.note
                 qa["cuts"] = len(pieces) - 1
                 qa["cut_s"] = round(end - start - clip_len, 2)
@@ -558,12 +619,19 @@ def render_source(settings: Settings, camp: Campaign, source_id: str, force: boo
     return made
 
 
+def _rate_text(rate) -> str:
+    if isinstance(rate, dict):
+        return ", ".join(f"${v:g} on {k}" for k, v in rate.items())
+    return f"${rate}" if rate is not None else "$?"
+
+
 def write_post(path: Path, cid: str, m, variant: int, hook: str, hooks: list[str], camp: Campaign,
                qa: dict) -> Path:
     """Per-clip submission checklist: caption to paste, the campaign rules that apply, ticks."""
     pay = camp.payout or {}
     concept = (m["concept"] if "concept" in m.keys() else "") or m["title"]
-    names = " ".join("@" + c.rstrip("/").rsplit("/", 1)[-1] for c in camp.channels)
+    names = " ".join(camp.mentions) if camp.mentions else \
+        " ".join("@" + c.rstrip("/").rsplit("/", 1)[-1] for c in camp.channels)
     tags = " ".join(camp.hashtags)
     caption = " ".join(x for x in [concept.rstrip(".") + ".", names, tags, camp.disclosure] if x)
     within = pay.get("submit_within_min")
@@ -577,22 +645,35 @@ def write_post(path: Path, cid: str, m, variant: int, hook: str, hooks: list[str
         "## Caption to paste", "", "```", caption, "```", "",
         "## Campaign rules that apply", "",
         f"- Campaign: {camp.id} ({camp.creator})",
-        f"- Pays ${pay.get('per_1k_views', '?')} per 1,000 views, only once a post reaches "
+        f"- Pays {_rate_text(pay.get('per_1k_views'))} per 1,000 views, only once a post reaches "
         f"{pay.get('min_views', 0):,} views; ${pay.get('min_payout', '?')} minimum, ${pay.get('max_payout', '?')} cap per clip",
         f"- Allowed platforms: {', '.join(pay.get('platforms', [])) or 'see campaign page'}",
         f"- Submit each post's link at {camp.campaign_url or '(campaign URL missing in campaigns.yaml)'}"
         + (f" within {within:g} minutes of posting" if within else ""),
         f"- Rules page: {camp.rules_url or '(missing)'}",
         f"- Required on screen: \"{camp.handle}\" and {camp.disclosure} for {camp.disclosure_seconds:g} s (burned in)",
-        "- Not allowed: " + "; ".join(camp.prohibited or ["nothing listed"]), "",
+        "- Not allowed: " + "; ".join(camp.prohibited or ["nothing listed"]),
+        *([f"- Footage: {camp.footage}"] if camp.footage else []),
+        *([f"- Accounts: at least {camp.min_followers:,} followers or a dedicated account"]
+          if camp.min_followers else []),
+        *([f"- New accounts wait {camp.min_account_age_h:g} h before their first post"]
+          if camp.min_account_age_h else []),
+        *([f"- On screen: logo ({(camp.logo_overlay or {}).get('corner', 'top-right')}), "
+           f"{'title, ' if camp.title_on_screen else ''}{'CTA \"' + camp.cta_text + '\"' if camp.cta_text else ''}"]
+          if (camp.logo_overlay or camp.title_on_screen or camp.cta_text) else []),
+        *[f"- {n}" for n in camp.notes], "",
         "## Tick list", "",
         "- [ ] Watched the whole clip: every caption and on-screen text fully legible",
         "- [ ] Passes the tastemaker bar (see the ranking); if not, don't post",
         "- [ ] Caption pasted with hashtags and #ad",
     ]
+    if camp.application_required:
+        lines.insert(lines.index("## Tick list") + 2, "- [ ] Application to this campaign accepted (check before posting)")
     for plat in pay.get("platforms", []):
         lines.append(f"- [ ] Posted on {plat}"
                      + (f", link submitted within {within:g} min" if within else ", link submitted"))
+        if camp.stories_per_clip:
+            lines.append(f"- [ ] Story posted for this clip on {plat}")
     lines += ["- [ ] Row added to work/revenue/ledger.csv (then views at 24 h / 72 h / 7 d)", ""]
     path.write_text("\n".join(lines))
     return path

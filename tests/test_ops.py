@@ -111,6 +111,32 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(slots, [])
 
 
+class CampaignRuleTests(unittest.TestCase):
+    def test_per_platform_payout(self):
+        c = camp(payout={"per_1k_views": {"tiktok": 2.0, "youtube_shorts": 0.5}, "min_views": 0})
+        self.assertEqual(ops.payout(c, 10000, "tiktok"), 20.0)
+        self.assertEqual(ops.payout(c, 10000, "youtube_shorts"), 5.0)
+        self.assertEqual(ops.payout(c, 10000, "x"), 0.0)
+
+    def test_new_account_waits_and_needs_followers_or_dedicated(self):
+        c = camp(min_account_age_h=24, min_followers=2000)
+        young = {"platform": "tiktok", "created_at": (NOW - timedelta(hours=5)).isoformat(), "followers": 5000}
+        self.assertIn("24 h", ops.account_ok(young, c, NOW))
+        small = {"platform": "tiktok", "created_at": "2026-01-01T00:00:00", "followers": 100}
+        self.assertIn("followers", ops.account_ok(small, c, NOW))
+        dedicated = dict(small, dedicated_to=["c1"])
+        self.assertIsNone(ops.account_ok(dedicated, c, NOW))
+
+    def test_queue_respects_account_rules(self):
+        accounts = [{"id": "tt", "platform": "tiktok", "campaigns": ["c1"], "active": True,
+                     "created_at": NOW.isoformat()}]
+        slots, notes = ops.build_queue(date(2026, 12, 1), [ops.Candidate("a", "m", "c1", 9.0)], accounts,
+                                       {"tt": ops.Health("healthy")}, {}, {"c1": camp(min_account_age_h=24)},
+                                       {"campaigns": {}, "accounts": {}}, set())
+        self.assertEqual(slots, [])
+        self.assertTrue(any("24 h" in n for n in notes))
+
+
 class CalibrationTests(unittest.TestCase):
     def test_lower_when_band_beats_median_half_the_time(self):
         self.assertEqual(ops.calibrate_gate(7.5, [(7.6, 200), (7.7, 300), (7.8, 50), (7.9, 40)], 100), 7.25)

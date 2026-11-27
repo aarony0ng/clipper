@@ -59,6 +59,18 @@ class Campaign:
     gate: float = 7.5
     reach_run: bool = False
     reach_ai_content_ok: bool = False
+    # Per-campaign extras (see campaigns.yaml for examples)
+    logo_overlay: dict[str, Any] | None = None   # {path, corner: top-left|top-right|bottom-left|bottom-right, width}
+    cta_text: str = ""                            # call to action burned in over the last seconds
+    cta_seconds: float = 4.0
+    title_on_screen: bool = False                 # the clip's concept stays on screen as a title
+    mentions: list[str] = field(default_factory=list)   # @handles for the post caption
+    stories_per_clip: bool = False                # campaign wants a story per posted clip
+    min_account_age_h: float = 0.0                # an account must be this old before its first post
+    min_followers: int = 0                        # ... and have this many followers, unless dedicated
+    application_required: bool = False
+    footage: str = ""                             # where the allowed source footage comes from
+    notes: list[str] = field(default_factory=list)
     # Per-channel overrides for group streams where each POV has its own facecam spot,
     # keyed by channel login (e.g. {"replays": Reframe(...)}).
     reframe_by_channel: dict[str, Reframe] = field(default_factory=dict)

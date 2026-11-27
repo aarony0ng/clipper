@@ -287,6 +287,11 @@ def build_queue(day: date, candidates: list[Candidate], accounts: list[dict], he
                 break
             if c.campaign not in a.get("campaigns", []):
                 continue
+            why = account_ok(a, campaigns.get(c.campaign), now)
+            if why:
+                if f"{a['id']}: {why}" not in notes:
+                    notes.append(f"{a['id']}: {why}")
+                continue
             camp_gate = max(GATE_FLOOR, gates.get(c.campaign, getattr(campaigns.get(c.campaign), "gate", DEFAULT_GATE)))
             if c.score < max(min_score, camp_gate):
                 continue
@@ -425,7 +430,7 @@ def measure(settings: Settings, camps: dict[str, Campaign], now: datetime | None
             r.setdefault(k, "")
         camp = camps.get(r.get("campaign", ""))
         if camp and due[-1] == "views_7d":
-            r["payout_usd"] = f"{payout(camp, views):.2f}"
+            r["payout_usd"] = f"{payout(camp, views, r.get('platform')):.2f}"
         done += 1
     write_ledger(settings, rows)
     _health_all(settings, load_accounts(settings), rows, now)
@@ -433,11 +438,35 @@ def measure(settings: Settings, camps: dict[str, Campaign], now: datetime | None
     return done
 
 
-def payout(camp: Campaign, views: float) -> float:
+def payout(camp: Campaign, views: float, platform: str | None = None) -> float:
+    """Estimated payout for one post. per_1k_views may be one rate or {platform: rate}."""
     p = camp.payout or {}
     if views < float(p.get("min_views", 0)):
         return 0.0
-    return min(float(p.get("max_payout", 1e9)), float(p.get("per_1k_views", 0)) * views / 1000)
+    rate = p.get("per_1k_views", 0)
+    if isinstance(rate, dict):
+        rate = rate.get(platform or "", 0)
+    return min(float(p.get("max_payout", 1e9)), float(rate) * views / 1000)
+
+
+def account_ok(a: dict, camp: Campaign | None, now: datetime) -> str | None:
+    """Why this account can't post for this campaign yet, or None. Pure function (tested)."""
+    if camp is None:
+        return None
+    rate = (camp.payout or {}).get("per_1k_views")
+    if isinstance(rate, dict) and a.get("platform") not in rate:
+        return f"{camp.id} doesn't pay on {a.get('platform')}"
+    plats = (camp.payout or {}).get("platforms")
+    if plats and a.get("platform") not in plats:
+        return f"{camp.id} doesn't allow {a.get('platform')}"
+    if camp.min_followers and int(a.get("followers") or 0) < camp.min_followers \
+            and camp.id not in (a.get("dedicated_to") or []):
+        return f"{camp.id} needs {camp.min_followers:,} followers or a dedicated account"
+    if camp.min_account_age_h:
+        made = _ts(str(a.get("created_at") or ""))
+        if made is None or now - made < timedelta(hours=camp.min_account_age_h):
+            return f"{camp.id}: account must be {camp.min_account_age_h:g} h old before its first post"
+    return None
 
 
 def calibrate_gate(gate: float, scored: list[tuple[float, float]], median: float, min_n: int = 4) -> float:
