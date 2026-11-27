@@ -54,6 +54,10 @@ def connect(work_dir: Path) -> sqlite3.Connection:
     if "subcaption" not in cols:  # added with the tastemaker
         con.execute("ALTER TABLE moment ADD COLUMN subcaption TEXT")
         con.commit()
+    ccols = {r[1] for r in con.execute("PRAGMA table_info(clip)")}
+    if "score" not in ccols:  # tastemaker bar score (0-10), used by clipper ops
+        con.execute("ALTER TABLE clip ADD COLUMN score REAL")
+        con.commit()
     if "concept" not in cols:  # big-idea gate: the clip's one-line concept
         con.execute("ALTER TABLE moment ADD COLUMN concept TEXT")
         con.commit()

@@ -70,6 +70,10 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("config", help="scan config JSON (see clipper/scan.py)")
     a.add_argument("--top", type=int, default=24, help="peaks to shortlist")
 
+    a = sub.add_parser("ops", help="revenue loop: post sheet, view counts, calibration (never posts)")
+    a.add_argument("step", choices=["queue", "measure", "calibrate", "status"])
+    a.add_argument("--date", help="queue for this day (YYYY-MM-DD), default today")
+
     sub.add_parser("campaigns", help="list campaigns and whether they are licensed")
 
     args = p.parse_args(argv)
@@ -111,6 +115,17 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "scan":
         from . import scan
         scan.run(settings, Path(args.config), top=args.top)
+    elif args.cmd == "ops":
+        from datetime import date
+        from . import ops
+        if args.step == "queue":
+            ops.queue(settings, camps, Path(args.config), date.fromisoformat(args.date) if args.date else None)
+        elif args.step == "measure":
+            ops.measure(settings, camps)
+        elif args.step == "calibrate":
+            ops.calibrate(settings, camps)
+        else:
+            ops.status(settings, camps, Path(args.config))
     elif args.cmd == "taste":
         from . import taste
         camp = camps[args.campaign]

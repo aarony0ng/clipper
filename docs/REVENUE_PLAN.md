@@ -1,7 +1,7 @@
 # Revenue plan: views without wrecking the account
 
 Owner: the revenue strategist (`.claude/agents/revenue-strategist.md`), with the
-tastemaker as the quality gate. Machine-readable rules: `revenue_policy.yaml`.
+tastemaker as the quality gate. Implemented in `clipper/ops.py` (`clipper ops ...`).
 
 ## The objective
 
@@ -31,11 +31,9 @@ So the strategy is **fewer, stronger posts, spread across every allowed platform
 3. **Big-idea gate.** Every moment needs a concept of 5 words or fewer naming a creator plus a
    superlative, a number or stakes. No concept, no render.
 4. **Render** with the style guide, fast cuts and text-safe framing. Automatic checks must pass.
-5. **Tastemaker score.** Each clip is scored 0-10 on six things: hook in the first 1.5 s,
-   payoff, energy, makes sense without context, visual quality, fit with the top Shorts.
-   The scores put it in a tier (below).
-6. **Queue.** Tier A clips go in the posting queue, best first, within the cadence limits.
-   Tier B clips can only go out as tests, within the test limits. Tier C is archived.
+5. **Tastemaker score.** Each clip is scored 0-10 (below). Under the bar, it's never posted.
+6. **Queue.** `clipper ops queue` fills today's slots from each account's health caps,
+   highest score first, and writes the post sheet.
 7. **Post and submit** (Aaron, or a posting step he has approved): every allowed platform,
    the post checklist's caption, the campaign submit link within 30 minutes.
 8. **Measure.** Ledger rows at 24 h, 72 h and 7 days: views, and where the platform shows
@@ -43,35 +41,45 @@ So the strategy is **fewer, stronger posts, spread across every allowed platform
 9. **Learn.** Weekly: compare scores with results, move the thresholds, retire hooks and
    formats that don't earn, and report $ earned, $ per hour and what changes next week.
 
-## Tiers (the quality/volume balance)
+## Quality bar and account health (implemented in `clipper ops`)
 
-| Tier | Rule | What happens |
-|---|---|---|
-| A | average ≥ 7.0, no score under 6, hook ≥ 7, visual ≥ 8 | Post on every allowed platform, in queue order |
-| B | average 6.0–6.9, hook ≥ 6, visual ≥ 8 | Test only: one platform, at most 1 test per week, never two posts in a row that are tests |
-| C | anything else | Never posted |
+Every clip gets the tastemaker bar score (0-10: hook in the first 1.5 s, payoff, energy, makes
+sense without context, visual quality, fit with the top Shorts), stored on the clip. A clip is
+never queued below the bar: **7.5 by default, never below 7.0**, set per campaign (`gate` in
+campaigns.yaml) and per account (work/revenue/accounts.yaml), and moved weekly by calibration.
 
-Hook and visual have their own floors because the hook decides the first test audience
-and a sloppy frame (cut text, smudges) reads as a low-quality account.
+Each posting account (one per platform handle) has a health state. Baseline = the median 7-day
+views of the account's last 30 days of posts.
 
-## Cadence and account health
+| State | Trigger | Posts a day | Minimum score |
+|---|---|---|---|
+| Warm-up | fewer than 10 posts | 1 | 8.0 |
+| Healthy | median of the last 10 at or above baseline | up to 3 | the bar (7.5) |
+| Watch | last-10 median at 50-99% of baseline, or 2 in a row under 25% | 1 | 8.5 |
+| Recover | last-10 median under 50% of baseline | 0 for 48 h, then 1 | 9.0 |
 
-- At most 2 posts per platform per day, at least 4 hours apart. Quality over count.
-- Keep a **rolling health score** per platform: the median 24-hour views of the last 5 posts,
-  compared with the account's own 30-day median.
-  - Healthy (≥ 60% of the 30-day median): follow the queue.
-  - Warning (30–60%): Tier A only, at most 1 post a day, no tests.
-  - Pause (< 30%, or 3 posts in a row under 1,000 views at 24 h): stop posting on that
-    platform for 48 hours, review the last 5 posts, and raise the Tier A bar by 0.5 until
-    two posts in a row clear the campaign minimum.
-- A new account starts in "warning" until it has 10 posts.
-- Never delete posts to tidy the numbers, and never repost the same clip to the same account.
+Down as soon as a trigger fires; up one state after 5 posts in a row at or above baseline.
+
+Queue rules: highest score first, at least 3 hours apart on an account, never two clips of one
+moment on an account on the same day, and a clip that waits a day without a slot expires.
+
+Stop rules (`work/revenue/stops.yaml`): a campaign rejection or strike warning pauses that
+campaign; a reach-limit or unoriginal-content notice pauses that account; Reach-run campaigns
+(SypherPK included) stay blocked until Aaron sets `reach_ai_content_ok: true`.
+
+Weekly calibration: if clips scored 7.5-8.0 beat the account median at least half the time, the
+bar drops 0.25; under a third of the time, it rises 0.25; never below 7.0. Next week's slots are
+split across campaigns by measured $ per clip, at most 50% to one campaign, 20% kept for exploring.
+
+Commands: `clipper ops queue` (writes work/revenue/queue-YYYY-MM-DD.md), `clipper ops measure`
+(public view counts at 24 h / 72 h / 7 d via yt-dlp metadata, no sign-in), `clipper ops calibrate`
+(weekly), `clipper ops status`.
 
 ## Money rules
 
-- Post fast: budgets drain first-come, first-served. A Tier A clip from a fresh stream is
+- Post fast: budgets drain first-come, first-served. A clip above the bar from a fresh stream is
   worth more today than tomorrow.
-- Front-load: when a campaign's budget is over 70% spent, only Tier A clips that can clear the
+- Front-load: when a campaign's budget is over 70% spent, only clips well above the bar that can clear the
   minimum within 48 hours are worth the time.
 - A clip that has hit the per-clip cap ($500 at $2 CPM = 250,000 views) earns nothing more.
   Spend the effort on the next clip.
@@ -94,8 +102,9 @@ hooks, ever.
 
 ## Where we are now (2026-11-26)
 
-- Sypher Nov 15 campaign: 9 concept-gated moments rendered, **0 in Tier A**. The best, "Sypher's first
-  ever hole-in-one", scores about 6.5: Tier B, so one test post on one platform at most.
+- Sypher Nov 15 campaign: 9 concept-gated moments rendered, **0 at or above the 7.5 bar**. The best,
+  "Sypher's first ever hole-in-one", scores about 6.5. The campaign is also Reach-run, so it stays
+  blocked until Reach answers the AI-content question.
 - The source was calm. The biggest lever is better source: the next high-energy stream on a
   licensed campaign, with chat replay data (waiting on TwitchDownloaderCLI approval).
 - The GTA 6 campaigns ($1.50 CPM, $11k combined budget) can't be priced until their campaign

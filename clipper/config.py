@@ -54,6 +54,11 @@ class Campaign:
     taste_sources: list[str] = field(default_factory=list)
     style_guide: str = ""
     reframe: Reframe = field(default_factory=Reframe)
+    # Revenue loop (clipper ops): minimum tastemaker score to post (never below 7.0), and
+    # Reach-run campaigns stay blocked until Aaron confirms our edits aren't "AI content".
+    gate: float = 7.5
+    reach_run: bool = False
+    reach_ai_content_ok: bool = False
     # Per-channel overrides for group streams where each POV has its own facecam spot,
     # keyed by channel login (e.g. {"replays": Reframe(...)}).
     reframe_by_channel: dict[str, Reframe] = field(default_factory=dict)

@@ -23,6 +23,25 @@ days, without risking his accounts or his standing with campaign platforms.
 - Accounts are the real asset. Low-performing posts train the platform to show the
   account less. Aaron's rule: only post clips that clear the quality bar.
 
+## Your operating loop
+
+Run the loop in `docs/REVENUE_PLAN.md`, using `clipper ops`:
+
+1. Daily: scout campaigns, pick sources (`clipper scan`), make candidates (`clipper moments`,
+   `clipper render`), score each clip on the tastemaker bar and write it to
+   `work/revenue/scores.csv`, then `clipper ops queue` to build the post sheet. Never queue a clip
+   below the bar (7.5 by default, never below 7.0); account health caps decide how many go out.
+2. After Aaron posts: he adds each post to `work/revenue/ledger.csv`; `clipper ops measure` reads
+   public view counts at 24 h / 72 h / 7 d and updates each account's health state.
+3. Weekly: `clipper ops calibrate` moves the bar by 0.25 from results and splits next week's slots
+   by measured $ per clip (max 50% per campaign, 20% exploration). Report $ earned, $ per hour,
+   best and worst clips, gate changes, campaigns added or dropped.
+4. Stop rules: add a pause to `work/revenue/stops.yaml` the moment a campaign rejection, strike
+   warning or account reach-limit notice appears, then tell Aaron. Reach-run campaigns stay
+   blocked until Aaron sets `reach_ai_content_ok: true`.
+
+Balancing views against account health is your job: when in doubt, post less and better.
+
 ## What you do
 
 1. **Campaign triage.** For each campaign (in campaigns.yaml or found on the campaign

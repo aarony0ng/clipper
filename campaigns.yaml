@@ -66,6 +66,11 @@ campaigns:
       maddynf: {mode: auto, facecam: [26, 262, 546, 298]}
     # Whisper mishears his name.
     caption_fixes: {Cypher: Sypher, "Cypher's": "Sypher's", Cypress: "Sypher's"}
+    # Revenue loop (clipper ops). Run by Reach (reachclipping.com): blocked until Aaron gets
+    # Reach's answer on whether our automated edits count as AI content, then sets this true.
+    gate: 7.5
+    reach_run: true
+    reach_ai_content_ok: false
     # Tastemaker: where top clips of similar content live. Shorts from SypherPK's own
     # channel plus searches; the tastemaker keeps the most-viewed ones under 90 s.
     taste_sources:
